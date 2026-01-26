@@ -2,7 +2,19 @@
 FROM node:20-alpine AS builder
 
 # Устанавливаем зависимости для сборки canvas и компиляции TypeScript
-RUN apk add --no-cache python3 make g++ cairo-dev jpeg-dev pango-dev giflib-dev
+RUN apk add --no-cache \
+    python3 \
+    py3-pip \
+    make \
+    g++ \
+    pkgconfig \
+    cairo-dev \
+    jpeg-dev \
+    pango-dev \
+    giflib-dev \
+    pixman-dev \
+    libpng-dev \
+    && ln -sf python3 /usr/bin/python
 
 WORKDIR /app
 
@@ -29,8 +41,11 @@ WORKDIR /app
 # Копируем package файлы
 COPY package*.json ./
 
-# Устанавливаем только production зависимости
-RUN npm ci --only=production && npm cache clean --force
+# Копируем собранные node_modules из builder stage (canvas уже собран)
+COPY --from=builder /app/node_modules ./node_modules
+
+# Удаляем dev-зависимости для уменьшения размера образа
+RUN npm prune --production
 
 # Копируем скомпилированный код из builder stage
 COPY --from=builder /app/dist ./dist
