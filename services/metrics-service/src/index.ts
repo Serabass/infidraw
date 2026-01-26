@@ -156,7 +156,7 @@ function formatBytes(bytes: number): string {
   return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
 }
 
-// GET /metrics - получить все метрики
+// GET /metrics - получить все метрики (JSON или Prometheus формат)
 app.get('/metrics', async (req, res) => {
   try {
     const [postgres, minio, redis] = await Promise.all([
@@ -165,6 +165,65 @@ app.get('/metrics', async (req, res) => {
       getRedisMetrics(),
     ]);
 
+    // Если запрашивают Prometheus формат
+    if (req.query.format === 'prometheus' || req.headers.accept?.includes('text/plain')) {
+      const totalSize = postgres.databaseSize + minio.bucketSize + redis.usedMemory;
+      const timestamp = Date.now() / 1000;
+
+      let prometheusMetrics = `# HELP infidraw_postgres_database_size_bytes PostgreSQL database size in bytes
+# TYPE infidraw_postgres_database_size_bytes gauge
+infidraw_postgres_database_size_bytes ${postgres.databaseSize}
+
+# HELP infidraw_postgres_table_size_bytes PostgreSQL stroke_events table size in bytes
+# TYPE infidraw_postgres_table_size_bytes gauge
+infidraw_postgres_table_size_bytes ${postgres.tableSize}
+
+# HELP infidraw_postgres_events_total Total number of stroke events in PostgreSQL
+# TYPE infidraw_postgres_events_total counter
+infidraw_postgres_events_total ${postgres.eventCount}
+
+# HELP infidraw_postgres_oldest_event_timestamp Timestamp of the oldest event in PostgreSQL
+# TYPE infidraw_postgres_oldest_event_timestamp gauge
+infidraw_postgres_oldest_event_timestamp ${postgres.oldestEvent ? postgres.oldestEvent / 1000 : 0}
+
+# HELP infidraw_postgres_newest_event_timestamp Timestamp of the newest event in PostgreSQL
+# TYPE infidraw_postgres_newest_event_timestamp gauge
+infidraw_postgres_newest_event_timestamp ${postgres.newestEvent ? postgres.newestEvent / 1000 : 0}
+
+# HELP infidraw_minio_bucket_size_bytes MinIO bucket size in bytes
+# TYPE infidraw_minio_bucket_size_bytes gauge
+infidraw_minio_bucket_size_bytes ${minio.bucketSize}
+
+# HELP infidraw_minio_objects_total Total number of objects in MinIO bucket
+# TYPE infidraw_minio_objects_total counter
+infidraw_minio_objects_total ${minio.objectCount}
+
+# HELP infidraw_minio_average_object_size_bytes Average object size in MinIO bucket
+# TYPE infidraw_minio_average_object_size_bytes gauge
+infidraw_minio_average_object_size_bytes ${minio.averageObjectSize}
+
+# HELP infidraw_redis_memory_bytes Redis used memory in bytes
+# TYPE infidraw_redis_memory_bytes gauge
+infidraw_redis_memory_bytes ${redis.usedMemory}
+
+# HELP infidraw_redis_connected_clients Number of connected Redis clients
+# TYPE infidraw_redis_connected_clients gauge
+infidraw_redis_connected_clients ${redis.connectedClients}
+
+# HELP infidraw_total_size_bytes Total storage size across all services in bytes
+# TYPE infidraw_total_size_bytes gauge
+infidraw_total_size_bytes ${totalSize}
+
+# HELP infidraw_metrics_scrape_timestamp Timestamp when metrics were scraped
+# TYPE infidraw_metrics_scrape_timestamp gauge
+infidraw_metrics_scrape_timestamp ${timestamp}
+`;
+
+      res.setHeader('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
+      return res.send(prometheusMetrics);
+    }
+
+    // По умолчанию возвращаем JSON
     const totalSize = postgres.databaseSize + minio.bucketSize + redis.usedMemory;
 
     const metrics: SystemMetrics = {
@@ -272,6 +331,76 @@ app.get('/metrics/redis', async (req, res) => {
   } catch (error) {
     console.error('Error fetching Redis metrics:', error);
     res.status(500).json({ error: 'Failed to fetch Redis metrics' });
+  }
+});
+
+// GET /metrics/prometheus - метрики в формате Prometheus
+app.get('/metrics/prometheus', async (req, res) => {
+  try {
+    const [postgres, minio, redis] = await Promise.all([
+      getPostgresMetrics(),
+      getMinIOMetrics(),
+      getRedisMetrics(),
+    ]);
+
+    const totalSize = postgres.databaseSize + minio.bucketSize + redis.usedMemory;
+    const timestamp = Date.now() / 1000; // Prometheus использует секунды
+
+    // Формируем метрики в формате Prometheus
+    let prometheusMetrics = `# HELP infidraw_postgres_database_size_bytes PostgreSQL database size in bytes
+# TYPE infidraw_postgres_database_size_bytes gauge
+infidraw_postgres_database_size_bytes ${postgres.databaseSize}
+
+# HELP infidraw_postgres_table_size_bytes PostgreSQL stroke_events table size in bytes
+# TYPE infidraw_postgres_table_size_bytes gauge
+infidraw_postgres_table_size_bytes ${postgres.tableSize}
+
+# HELP infidraw_postgres_events_total Total number of stroke events in PostgreSQL
+# TYPE infidraw_postgres_events_total counter
+infidraw_postgres_events_total ${postgres.eventCount}
+
+# HELP infidraw_postgres_oldest_event_timestamp Timestamp of the oldest event in PostgreSQL
+# TYPE infidraw_postgres_oldest_event_timestamp gauge
+infidraw_postgres_oldest_event_timestamp ${postgres.oldestEvent ? postgres.oldestEvent / 1000 : 0}
+
+# HELP infidraw_postgres_newest_event_timestamp Timestamp of the newest event in PostgreSQL
+# TYPE infidraw_postgres_newest_event_timestamp gauge
+infidraw_postgres_newest_event_timestamp ${postgres.newestEvent ? postgres.newestEvent / 1000 : 0}
+
+# HELP infidraw_minio_bucket_size_bytes MinIO bucket size in bytes
+# TYPE infidraw_minio_bucket_size_bytes gauge
+infidraw_minio_bucket_size_bytes ${minio.bucketSize}
+
+# HELP infidraw_minio_objects_total Total number of objects in MinIO bucket
+# TYPE infidraw_minio_objects_total counter
+infidraw_minio_objects_total ${minio.objectCount}
+
+# HELP infidraw_minio_average_object_size_bytes Average object size in MinIO bucket
+# TYPE infidraw_minio_average_object_size_bytes gauge
+infidraw_minio_average_object_size_bytes ${minio.averageObjectSize}
+
+# HELP infidraw_redis_memory_bytes Redis used memory in bytes
+# TYPE infidraw_redis_memory_bytes gauge
+infidraw_redis_memory_bytes ${redis.usedMemory}
+
+# HELP infidraw_redis_connected_clients Number of connected Redis clients
+# TYPE infidraw_redis_connected_clients gauge
+infidraw_redis_connected_clients ${redis.connectedClients}
+
+# HELP infidraw_total_size_bytes Total storage size across all services in bytes
+# TYPE infidraw_total_size_bytes gauge
+infidraw_total_size_bytes ${totalSize}
+
+# HELP infidraw_metrics_scrape_timestamp Timestamp when metrics were scraped
+# TYPE infidraw_metrics_scrape_timestamp gauge
+infidraw_metrics_scrape_timestamp ${timestamp}
+`;
+
+    res.setHeader('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
+    res.send(prometheusMetrics);
+  } catch (error) {
+    console.error('Error fetching Prometheus metrics:', error);
+    res.status(500).send('# Error fetching metrics\n');
   }
 });
 

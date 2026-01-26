@@ -312,12 +312,11 @@ function App() {
     };
 
     const newZoom = e.evt.deltaY > 0 ? camera.zoom * 0.9 : camera.zoom * 1.1;
-    const clampedZoom = Math.max(0.1, Math.min(5, newZoom));
 
     setCamera({
-      x: pointer.x - mousePointTo.x * clampedZoom,
-      y: pointer.y - mousePointTo.y * clampedZoom,
-      zoom: clampedZoom,
+      x: pointer.x - mousePointTo.x * newZoom,
+      y: pointer.y - mousePointTo.y * newZoom,
+      zoom: newZoom,
     });
   };
 
@@ -428,6 +427,30 @@ function App() {
         <div style={{ marginTop: '10px', fontSize: '11px', color: '#888' }}>
           Zoom: {camera.zoom.toFixed(2)}x
         </div>
+        <button
+          onClick={() => setCamera({ x: 0, y: 0, zoom: 1 })}
+          style={{
+            marginTop: '15px',
+            padding: '8px 16px',
+            border: '1px solid #ddd',
+            borderRadius: '6px',
+            background: '#fff',
+            cursor: 'pointer',
+            fontSize: '12px',
+            fontWeight: 'bold',
+            color: '#333',
+            width: '100%',
+            transition: 'all 0.2s',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = '#f5f5f5';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = '#fff';
+          }}
+        >
+          🏠 Вернуться в начало
+        </button>
       </div>
 
       <Stage
