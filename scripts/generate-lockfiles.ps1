@@ -25,38 +25,38 @@ foreach ($service in $services) {
     Write-Host "Processing $service..." -ForegroundColor Green
     
     try {
-        if (Test-Path (Join-Path $path "package.json")) {
-            # Удаляем старый lock файл если есть
-            $lockFile = Join-Path $path "package-lock.json"
-            if (Test-Path $lockFile) {
-                Remove-Item $lockFile -Force
-                Write-Host "  Removed old package-lock.json" -ForegroundColor Gray
-            }
-            
-            # Генерируем новый через Docker
-            $serviceName = $service.Replace("/", "-").Replace("\\", "-")
-            $containerName = "lockfile-gen-$serviceName"
-            
-            # Останавливаем и удаляем контейнер если существует
-            docker rm -f $containerName 2>$null | Out-Null
-            
-            # Запускаем временный контейнер для генерации lock файла
-            $pathEscaped = $path.Replace('\', '/')
-            docker run --rm `
-                -v "${pathEscaped}:/app" `
-                -w /app `
-                node:20-alpine `
-                sh -c "npm install --package-lock-only"
-            
-            if ($LASTEXITCODE -eq 0) {
-                Write-Host "  Generated package-lock.json" -ForegroundColor Green
-            } else {
-                Write-Host "  Error generating package-lock.json" -ForegroundColor Red
-            }
-        } else {
+        $packageJson = Join-Path $path "package.json"
+        if (-not (Test-Path $packageJson)) {
             Write-Host "  No package.json found, skipping" -ForegroundColor Yellow
+            continue
         }
-    } catch {
+        
+        # Удаляем старый lock файл если есть
+        $lockFile = Join-Path $path "package-lock.json"
+        if (Test-Path $lockFile) {
+            Remove-Item $lockFile -Force
+            Write-Host "  Removed old package-lock.json" -ForegroundColor Gray
+        }
+        
+        # Генерируем новый через Docker
+        # Используем абсолютный путь для Windows
+        $absolutePath = (Resolve-Path $path).Path
+        
+        Write-Host "  Running npm install in Docker..." -ForegroundColor Gray
+        docker run --rm `
+            -v "${absolutePath}:/app" `
+            -w /app `
+            node:20-alpine `
+            sh -c "npm install --package-lock-only"
+        
+        if ($LASTEXITCODE -eq 0 -and (Test-Path $lockFile)) {
+            Write-Host "  Generated package-lock.json" -ForegroundColor Green
+        }
+        else {
+            Write-Host "  Error generating package-lock.json (exit code: $LASTEXITCODE)" -ForegroundColor Red
+        }
+    }
+    catch {
         Write-Host "  Error: $_" -ForegroundColor Red
     }
 }
