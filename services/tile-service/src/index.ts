@@ -93,24 +93,24 @@ async function getStrokesForTile(tileX: number, tileY: number, sinceVersion?: nu
     });
 }
 
-function getBrushStyle(tool: string) {
+function getBrushStyle(tool: string): { opacity: number; lineCap: CanvasLineCap; lineJoin: CanvasLineJoin; dash: number[] } {
   switch (tool) {
     case 'pen':
-      return { opacity: 1, lineCap: 'round' as CanvasLineCap, lineJoin: 'round' as CanvasLineJoin, dash: [] };
+      return { opacity: 1, lineCap: 'round', lineJoin: 'round', dash: [] };
     case 'brush':
-      return { opacity: 0.8, lineCap: 'round' as CanvasLineCap, lineJoin: 'round' as CanvasLineJoin, dash: [] };
+      return { opacity: 0.8, lineCap: 'round', lineJoin: 'round', dash: [] };
     case 'marker':
-      return { opacity: 0.7, lineCap: 'square' as CanvasLineCap, lineJoin: 'miter' as CanvasLineJoin, dash: [] };
+      return { opacity: 0.7, lineCap: 'square', lineJoin: 'miter', dash: [] };
     case 'highlighter':
-      return { opacity: 0.4, lineCap: 'round' as CanvasLineCap, lineJoin: 'round' as CanvasLineJoin, dash: [] };
+      return { opacity: 0.4, lineCap: 'round', lineJoin: 'round', dash: [] };
     case 'pencil':
-      return { opacity: 0.9, lineCap: 'round' as CanvasLineCap, lineJoin: 'round' as CanvasLineJoin, dash: [] };
+      return { opacity: 0.9, lineCap: 'round', lineJoin: 'round', dash: [] };
     case 'chalk':
-      return { opacity: 0.85, lineCap: 'round' as CanvasLineCap, lineJoin: 'round' as CanvasLineJoin, dash: [5, 5] };
+      return { opacity: 0.85, lineCap: 'round', lineJoin: 'round', dash: [5, 5] };
     case 'eraser':
-      return { opacity: 1, lineCap: 'round' as CanvasLineCap, lineJoin: 'round' as CanvasLineJoin, dash: [] };
+      return { opacity: 1, lineCap: 'round', lineJoin: 'round', dash: [] };
     default:
-      return { opacity: 1, lineCap: 'round' as CanvasLineCap, lineJoin: 'round' as CanvasLineJoin, dash: [] };
+      return { opacity: 1, lineCap: 'round', lineJoin: 'round', dash: [] };
   }
 }
 

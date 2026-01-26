@@ -1,0 +1,18 @@
+# Base image with build tools for tile-service
+# Build this once: docker build -f Dockerfile.base -t tile-service-base:latest .
+FROM node:20-alpine
+
+# Обновляем индекс и устанавливаем все build зависимости один раз
+RUN apk update && \
+    apk add --no-cache \
+    build-base \
+    python3 \
+    py3-pip \
+    pkgconfig \
+    cairo-dev \
+    pixman-dev \
+    jpeg-dev \
+    pango-dev \
+    giflib-dev \
+    libpng-dev && \
+    ln -sf python3 /usr/bin/python
