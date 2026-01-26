@@ -3,7 +3,7 @@ $ErrorActionPreference = "Stop"
 
 Write-Host "Building Docker images..." -ForegroundColor Cyan
 
-docker-compose build
+docker-compose build --progress=plain
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Build failed!" -ForegroundColor Red
