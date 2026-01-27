@@ -35,10 +35,10 @@ const requireAdmin = (req: express.Request, res: express.Response, next: express
 };
 
 // POST /admin/cleanup-old - удалить записи старше указанного периода
-// Параметры: days (по умолчанию 30 дней = месяц)
+// Параметры: days (по умолчанию 7 дней = неделя)
 app.post('/admin/cleanup-old', requireAdmin, async (req, res) => {
   try {
-    const days = parseInt(req.body.days || req.query.days as string || '30');
+    const days = parseInt(req.body.days || req.query.days as string || '7');
     const cutoffTimestamp = Date.now() - days * 24 * 60 * 60 * 1000;
     
     const result = await pool.query(

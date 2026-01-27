@@ -1,0 +1,54 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cleanup-old-strokes
+  namespace: infidraw
+spec:
+  # Запускать каждый день в 3:00 UTC (можно изменить на нужное время)
+  schedule: "0 3 * * *"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      ttlSecondsAfterFinished: 86400  # Удалить Job через сутки после завершения
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+          - name: cleanup
+            image: curlimages/curl:latest
+            command:
+            - /bin/sh
+            - -c
+            - |
+              echo "Starting cleanup of old strokes..."
+              response=$(curl -s -w "\n%{http_code}" -X POST \
+                -H "Content-Type: application/json" \
+                -H "x-admin-token: ${ADMIN_TOKEN}" \
+                "${ADMIN_SERVICE_URL}/admin/cleanup-old?days=${CLEANUP_DAYS}")
+              
+              http_code=$(echo "$response" | tail -n1)
+              body=$(echo "$response" | sed '$d')
+              
+              echo "Response code: $http_code"
+              echo "Response body: $body"
+              
+              if [ "$http_code" -eq 200 ]; then
+                echo "Cleanup completed successfully!"
+                exit 0
+              else
+                echo "Cleanup failed with HTTP code: $http_code"
+                exit 1
+              fi
+            env:
+            - name: ADMIN_SERVICE_URL
+              value: "http://admin-service:3000"  # URL admin-service в namespace infidraw
+            - name: ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: admin-credentials
+                  key: token
+            - name: CLEANUP_DAYS
+              value: "7"  # Удалять записи старше 7 дней (неделя)
+              # Можно изменить на 30 для месяца

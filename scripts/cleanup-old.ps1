@@ -7,7 +7,7 @@ param(
 
 $headers = @{
     "X-Admin-Token" = $Token
-    "Content-Type" = "application/json"
+    "Content-Type"  = "application/json"
 }
 
 $body = @{
@@ -19,7 +19,8 @@ try {
     Write-Host "Success: $($response.message)" -ForegroundColor Green
     Write-Host "Deleted events: $($response.deletedEvents)" -ForegroundColor Cyan
     Write-Host "Cutoff date: $($response.cutoffDate)" -ForegroundColor Gray
-} catch {
+}
+catch {
     Write-Host "Error: $_" -ForegroundColor Red
     exit 1
 }
