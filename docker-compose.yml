@@ -59,6 +59,7 @@ services:
       - metrics-service
       - admin-service
       - frontend
+      - frontend-v2
     restart: unless-stopped
 
   event-store:
@@ -180,6 +181,12 @@ services:
       - ./frontend:/app
       - /app/node_modules
     command: npm run dev -- --host
+
+  frontend-v2:
+    build: ./frontend-v2
+    expose:
+      - "80"
+    restart: unless-stopped
 
 volumes:
   postgres_data:
