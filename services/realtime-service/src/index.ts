@@ -54,7 +54,7 @@ async function initRedis() {
       
       if (event.type === 'stroke_created' && event.stroke) {
         const tiles = getTilesForStroke(event.stroke);
-        console.log(`[Redis] Stroke affects tiles: ${tiles.join(', ')}, total clients: ${clients.size}`);
+        console.log(`[Redis] Stroke affects tiles: ${tiles.join(', ')}, tool=${event.stroke.tool}, points=${event.stroke.points.length}, total clients: ${clients.size}`);
         
         let notifiedCount = 0;
         for (const [ws, client] of clients.entries()) {
@@ -68,7 +68,7 @@ async function initRedis() {
             notifiedCount++;
           }
         }
-        console.log(`[Redis] Notified ${notifiedCount} clients about stroke ${event.strokeId}`);
+        console.log(`[Redis] Notified ${notifiedCount} clients about stroke ${event.strokeId} (tool: ${event.stroke.tool})`);
       }
     } catch (error) {
       console.error('Error processing stroke event:', error);

@@ -48,6 +48,7 @@ async function initRedis() {
 // POST /strokes - создать новый stroke
 app.post('/strokes', async (req, res) => {
   try {
+    console.log(`[EventStore] Received stroke request: tool=${req.body.tool}, points=${req.body.points?.length || 0}`);
     const body = StrokeSchema.parse(req.body);
     const strokeId = uuidv4();
     const timestamp = Date.now();
@@ -76,7 +77,7 @@ app.post('/strokes', async (req, res) => {
 
     const eventJson = JSON.stringify(event);
     await redisClient.publish('stroke_events', eventJson);
-    console.log(`[EventStore] Published stroke event to Redis: ${event.strokeId}, points: ${stroke.points.length}`);
+    console.log(`[EventStore] Published stroke event to Redis: ${event.strokeId}, tool=${stroke.tool}, points=${stroke.points.length}, color=${stroke.color}`);
 
     res.status(201).json({ strokeId, stroke });
   } catch (error) {

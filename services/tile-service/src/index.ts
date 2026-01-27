@@ -70,27 +70,31 @@ async function initRedis() {
 async function getStrokesForTile(tileX: number, tileY: number, sinceVersion?: number): Promise<Stroke[]> {
   const bbox = getTileBbox(tileX, tileY);
   
+  // Загружаем все strokes и фильтруем в коде, так как проверка всех точек в SQL сложна
+  // Можно оптимизировать, загружая только strokes, которые потенциально могут пересекаться с тайлом
   const query = `
-    SELECT stroke_data 
+    SELECT stroke_data, timestamp
     FROM stroke_events 
     WHERE event_type = 'stroke_created' 
       AND stroke_data->>'hidden' IS DISTINCT FROM 'true'
-      AND (
-        (stroke_data->'points'->0->>0)::float BETWEEN $1 AND $2
-        OR (stroke_data->'points'->0->>1)::float BETWEEN $3 AND $4
-      )
     ORDER BY timestamp ASC
   `;
 
-  const result = await pool.query(query, [bbox.x1, bbox.x2, bbox.y1, bbox.y2]);
+  const result = await pool.query(query);
+  console.log(`[TileService] Loaded ${result.rows.length} total strokes from DB for tile [${tileX},${tileY}]`);
   
-  return result.rows
+  // Фильтруем strokes, которые пересекаются с тайлом
+  const filtered = result.rows
     .map((row) => row.stroke_data as Stroke)
     .filter((stroke) => {
+      // Проверяем, есть ли хотя бы одна точка stroke в пределах тайла
       return stroke.points.some(
         ([x, y]) => x >= bbox.x1 && x < bbox.x2 && y >= bbox.y1 && y < bbox.y2
       );
     });
+  
+  console.log(`[TileService] Filtered to ${filtered.length} strokes for tile [${tileX},${tileY}] (bbox: ${bbox.x1},${bbox.y1} - ${bbox.x2},${bbox.y2})`);
+  return filtered;
 }
 
 function getBrushStyle(tool: string): { opacity: number; lineCap: CanvasLineCap; lineJoin: CanvasLineJoin; dash: number[] } {
@@ -181,6 +185,8 @@ app.get('/tiles', async (req, res) => {
     const y2 = parseFloat(req.query.y2 as string);
     const sinceVersion = req.query.sinceVersion ? parseInt(req.query.sinceVersion as string) : undefined;
 
+    console.log(`[TileService] GET /tiles: x1=${x1}, y1=${y1}, x2=${x2}, y2=${y2}`);
+
     if (isNaN(x1) || isNaN(y1) || isNaN(x2) || isNaN(y2)) {
       return res.status(400).json({ error: 'Invalid coordinates' });
     }
@@ -188,11 +194,14 @@ app.get('/tiles', async (req, res) => {
     const [minTileX, minTileY] = getTileCoords(x1, y1);
     const [maxTileX, maxTileY] = getTileCoords(x2, y2);
 
+    console.log(`[TileService] Tiles range: X[${minTileX}..${maxTileX}], Y[${minTileY}..${maxTileY}]`);
+
     const tiles: TileResponse[] = [];
 
     for (let tileX = minTileX; tileX <= maxTileX; tileX++) {
       for (let tileY = minTileY; tileY <= maxTileY; tileY++) {
         const strokes = await getStrokesForTile(tileX, tileY, sinceVersion);
+        console.log(`[TileService] Tile [${tileX},${tileY}]: found ${strokes.length} strokes`);
         
         // Проверяем, есть ли уже снапшот для этого тайла
         let snapshotUrl: string | undefined;

@@ -88,7 +88,7 @@ function App() {
           try {
             const data = JSON.parse(event.data);
             if (data.type === 'stroke_created' && data.stroke) {
-              console.log(`[Frontend] Received stroke via WebSocket: ${data.strokeId}`, data.stroke);
+              console.log(`[Frontend] Received stroke via WebSocket: ${data.strokeId}, tool=${data.stroke.tool}, points=${data.stroke.points?.length || 0}, color=${data.stroke.color}`);
               setStrokes((prev) => {
                 // Проверяем, нет ли уже такого stroke (избегаем дубликатов)
                 const exists = prev.some(s => s.id === data.stroke.id);
@@ -96,6 +96,7 @@ function App() {
                   console.log(`[Frontend] Stroke ${data.stroke.id} already exists, skipping`);
                   return prev;
                 }
+                console.log(`[Frontend] Adding stroke ${data.stroke.id} to list (tool: ${data.stroke.tool})`);
                 return [...prev, data.stroke];
               });
             }
@@ -139,9 +140,17 @@ function App() {
   }, []);
 
   const loadTiles = async () => {
-    if (!stageRef.current) return;
+    if (!stageRef.current) {
+      console.log('[Frontend] loadTiles: stageRef not ready');
+      return;
+    }
 
     const stage = stageRef.current.getStage();
+    if (!stage) {
+      console.log('[Frontend] loadTiles: stage not ready');
+      return;
+    }
+
     const stageWidth = stage.width();
     const stageHeight = stage.height();
 
@@ -156,54 +165,73 @@ function App() {
     const maxTileX = Math.floor(worldX2 / TILE_SIZE);
     const maxTileY = Math.floor(worldY2 / TILE_SIZE);
 
-    // Проверяем, какие тайлы уже загружены
-    const tilesToLoad: string[] = [];
-    for (let tileX = minTileX; tileX <= maxTileX; tileX++) {
-      for (let tileY = minTileY; tileY <= maxTileY; tileY++) {
-        const key = `${tileX},${tileY}`;
-        if (!tiles.has(key)) {
-          tilesToLoad.push(key);
-        }
-      }
-    }
+    console.log(`[Frontend] loadTiles: calculating tiles for area [${worldX1},${worldY1}] to [${worldX2},${worldY2}]`);
+    console.log(`[Frontend] loadTiles: tile range X[${minTileX}..${maxTileX}], Y[${minTileY}..${maxTileY}]`);
 
-    // Если все тайлы уже загружены, не делаем запрос
-    if (tilesToLoad.length === 0) {
-      return;
-    }
+    // Всегда загружаем тайлы, не проверяем кэш при первой загрузке
+    // Проверка кэша может пропустить загрузку из-за устаревшего состояния
 
     try {
-      const response = await fetch(
-        `${API_URL}/tiles?x1=${worldX1}&y1=${worldY1}&x2=${worldX2}&y2=${worldY2}`
-      );
+      console.log(`[Frontend] Loading tiles: x1=${worldX1}, y1=${worldY1}, x2=${worldX2}, y2=${worldY2}`);
+      const url = `${API_URL}/tiles?x1=${worldX1}&y1=${worldY1}&x2=${worldX2}&y2=${worldY2}`;
+      console.log(`[Frontend] Fetching from: ${url}`);
+      
+      const response = await fetch(url);
+      
+      if (!response.ok) {
+        console.error(`[Frontend] Failed to load tiles: ${response.status} ${response.statusText}`);
+        const errorText = await response.text();
+        console.error(`[Frontend] Error response: ${errorText}`);
+        return;
+      }
+      
       const data = await response.json();
+      console.log(`[Frontend] Received ${data.tiles?.length || 0} tiles, total strokes:`, 
+        data.tiles?.reduce((sum: number, tile: any) => sum + (tile.strokes?.length || 0), 0) || 0);
 
-      const newTiles = new Map(tiles);
-      const strokesMap = new Map<string, Stroke>();
-      
-      // Собираем все strokes из уже загруженных тайлов
-      for (const [key, tile] of tiles.entries()) {
-        for (const stroke of tile.strokes) {
-          strokesMap.set(stroke.id, stroke);
-        }
-      }
-
-      // Добавляем новые тайлы и их strokes
-      for (const tile of data.tiles) {
-        const key = `${tile.tileX},${tile.tileY}`;
-        newTiles.set(key, tile);
+      setTiles((prevTiles) => {
+        const newTiles = new Map(prevTiles);
+        const strokesMap = new Map<string, Stroke>();
         
-        for (const stroke of tile.strokes) {
-          strokesMap.set(stroke.id, stroke);
+        // Собираем все strokes из уже загруженных тайлов
+        for (const [key, tile] of prevTiles.entries()) {
+          for (const stroke of tile.strokes) {
+            strokesMap.set(stroke.id, stroke);
+          }
         }
-      }
-      
-      setTiles(newTiles);
-      setStrokes(Array.from(strokesMap.values()));
+
+        // Добавляем новые тайлы и их strokes
+        for (const tile of data.tiles) {
+          const key = `${tile.tileX},${tile.tileY}`;
+          newTiles.set(key, tile);
+          
+          console.log(`[Frontend] Tile [${tile.tileX},${tile.tileY}]: ${tile.strokes?.length || 0} strokes`);
+          for (const stroke of tile.strokes) {
+            strokesMap.set(stroke.id, stroke);
+          }
+        }
+        
+        console.log(`[Frontend] Total strokes after loading: ${strokesMap.size}`);
+        setStrokes(Array.from(strokesMap.values()));
+        
+        return newTiles;
+      });
     } catch (error) {
-      console.error('Error loading tiles:', error);
+      console.error('[Frontend] Error loading tiles:', error);
     }
   };
+
+  // Начальная загрузка тайлов при монтировании
+  useEffect(() => {
+    // Ждем инициализации stage перед загрузкой тайлов
+    const timeoutId = setTimeout(() => {
+      if (stageRef.current) {
+        loadTiles();
+      }
+    }, 500);
+
+    return () => clearTimeout(timeoutId);
+  }, []); // Загружаем только один раз при монтировании
 
   useEffect(() => {
     // Debounce для загрузки тайлов - не загружаем при каждом движении камеры
@@ -284,15 +312,16 @@ function App() {
     }
 
     // Отправляем stroke без id - сервер сам его сгенерирует
+    // Для ластика цвет не важен, но отправляем прозрачный для ясности
     const strokeData = {
       tool: brush,
-      color,
+      color: brush === 'eraser' ? 'transparent' : color,
       width,
       points,
     };
 
     try {
-      console.log(`[Frontend] Sending stroke to server: ${points.length} points`);
+      console.log(`[Frontend] Sending stroke to server: tool=${brush}, points=${points.length}, width=${width}`);
       const response = await fetch(`${API_URL}/strokes`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -381,6 +410,7 @@ function App() {
           borderRadius: '8px',
           boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
           minWidth: '200px',
+          display: 'none', // Скрыто пока что
         }}
       >
         <div style={{ marginBottom: '15px' }}>
@@ -483,38 +513,80 @@ function App() {
           scaleX={camera.zoom}
           scaleY={camera.zoom}
         >
-          {strokes.map((stroke) => {
-            const style = getBrushStyle(stroke.tool);
-            const strokeColor = stroke.tool === 'eraser' ? '#ffffff' : stroke.color;
-            return (
-              <Line
-                key={stroke.id}
-                points={stroke.points.flat()}
-                stroke={strokeColor}
-                strokeWidth={stroke.width}
-                tension={stroke.tool === 'chalk' ? 0.3 : 0.5}
-                lineCap={style.lineCap}
-                lineJoin={style.lineJoin}
-                opacity={style.opacity}
-                dash={style.dash}
-                globalCompositeOperation={stroke.tool === 'eraser' ? 'destination-out' : 'source-over'}
-              />
-            );
-          })}
-          {currentLinePoints && (() => {
+          {/* Обычные strokes (не ластик) */}
+          {strokes
+            .filter((stroke) => stroke.tool !== 'eraser')
+            .map((stroke) => {
+              const style = getBrushStyle(stroke.tool);
+              return (
+                <Line
+                  key={stroke.id}
+                  points={stroke.points.flat()}
+                  stroke={stroke.color}
+                  strokeWidth={stroke.width}
+                  tension={stroke.tool === 'chalk' ? 0.3 : 0.5}
+                  lineCap={style.lineCap}
+                  lineJoin={style.lineJoin}
+                  opacity={style.opacity}
+                  dash={style.dash}
+                />
+              );
+            })}
+          
+          {/* Текущий stroke (если не ластик) */}
+          {currentLinePoints && brush !== 'eraser' && (() => {
             const style = getBrushStyle(brush);
-            const strokeColor = brush === 'eraser' ? '#ffffff' : color;
             return (
               <Line
                 points={currentLinePoints}
-                stroke={strokeColor}
+                stroke={color}
                 strokeWidth={width}
                 tension={brush === 'chalk' ? 0.3 : 0.5}
                 lineCap={style.lineCap}
                 lineJoin={style.lineJoin}
                 opacity={style.opacity}
                 dash={style.dash}
-                globalCompositeOperation={brush === 'eraser' ? 'destination-out' : 'source-over'}
+              />
+            );
+          })()}
+          
+          {/* Ластик - рендерится последним, чтобы стирать всё что выше */}
+          {strokes
+            .filter((stroke) => stroke.tool === 'eraser')
+            .map((stroke) => {
+              const style = getBrushStyle(stroke.tool);
+              return (
+                <Line
+                  key={stroke.id}
+                  points={stroke.points.flat()}
+                  stroke="transparent"
+                  strokeWidth={stroke.width}
+                  tension={0.5}
+                  lineCap={style.lineCap}
+                  lineJoin={style.lineJoin}
+                  opacity={1}
+                  dash={style.dash}
+                  globalCompositeOperation="destination-out"
+                  listening={false}
+                />
+              );
+            })}
+          
+          {/* Текущий ластик */}
+          {currentLinePoints && brush === 'eraser' && (() => {
+            const style = getBrushStyle(brush);
+            return (
+              <Line
+                points={currentLinePoints}
+                stroke="transparent"
+                strokeWidth={width}
+                tension={0.5}
+                lineCap={style.lineCap}
+                lineJoin={style.lineJoin}
+                opacity={1}
+                dash={style.dash}
+                globalCompositeOperation="destination-out"
+                listening={false}
               />
             );
           })()}
