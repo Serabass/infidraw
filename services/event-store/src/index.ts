@@ -74,7 +74,9 @@ app.post('/strokes', async (req, res) => {
       [event.type, event.strokeId, JSON.stringify(stroke), event.timestamp]
     );
 
-    await redisClient.publish('stroke_events', JSON.stringify(event));
+    const eventJson = JSON.stringify(event);
+    await redisClient.publish('stroke_events', eventJson);
+    console.log(`[EventStore] Published stroke event to Redis: ${event.strokeId}, points: ${stroke.points.length}`);
 
     res.status(201).json({ strokeId, stroke });
   } catch (error) {

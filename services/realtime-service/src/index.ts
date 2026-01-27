@@ -11,7 +11,7 @@ const redisClient = createClient({
   url: process.env.REDIS_URL,
 });
 
-const wss = new WebSocketServer({ port: WS_PORT, path: '/ws' });
+const wss = new WebSocketServer({ port: WS_PORT, host: '0.0.0.0', path: '/ws' });
 
 interface Client {
   ws: WebSocket;
@@ -39,17 +39,24 @@ function getTilesForStroke(stroke: any): string[] {
 
 async function initRedis() {
   await redisClient.connect();
+  console.log('[Redis] Connected to Redis');
 
   const subscriber = redisClient.duplicate();
   await subscriber.connect();
+  console.log('[Redis] Subscriber connected');
 
-  await subscriber.subscribe('stroke_events', (message) => {
+  // В redis v4 подписка работает через обработчик сообщений
+  // Сначала подписываемся, потом устанавливаем обработчик
+  await subscriber.subscribe('stroke_events', (message, channel) => {
     try {
       const event: StrokeEvent = JSON.parse(message);
+      console.log(`[Redis] Received stroke event: ${event.type}, strokeId: ${event.strokeId}`);
       
       if (event.type === 'stroke_created' && event.stroke) {
         const tiles = getTilesForStroke(event.stroke);
+        console.log(`[Redis] Stroke affects tiles: ${tiles.join(', ')}, total clients: ${clients.size}`);
         
+        let notifiedCount = 0;
         for (const [ws, client] of clients.entries()) {
           // Отправляем событие если клиент подписан на хотя бы один тайл, 
           // или если клиент не подписан ни на что (для совместимости)
@@ -58,16 +65,21 @@ async function initRedis() {
           
           if (shouldNotify && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify(event));
+            notifiedCount++;
           }
         }
+        console.log(`[Redis] Notified ${notifiedCount} clients about stroke ${event.strokeId}`);
       }
     } catch (error) {
       console.error('Error processing stroke event:', error);
     }
   });
+  
+  console.log('[Redis] Subscribed to stroke_events channel');
 }
 
 wss.on('connection', (ws: WebSocket) => {
+  console.log(`[WS] New client connected, total: ${clients.size + 1}`);
   const client: Client = {
     ws,
     subscribedTiles: new Set(),
@@ -78,6 +90,7 @@ wss.on('connection', (ws: WebSocket) => {
   ws.on('message', (data: Buffer) => {
     try {
       const message = JSON.parse(data.toString());
+      console.log(`[WS] Received message from client: ${message.type}`);
 
       if (message.type === 'subscribe') {
         const { tiles } = message;
@@ -85,6 +98,7 @@ wss.on('connection', (ws: WebSocket) => {
           tiles.forEach((tile: string) => {
             client.subscribedTiles.add(tile);
           });
+          console.log(`[WS] Client subscribed to ${tiles.length} tiles: ${tiles.join(', ')}`);
         }
       } else if (message.type === 'unsubscribe') {
         const { tiles } = message;
@@ -92,6 +106,7 @@ wss.on('connection', (ws: WebSocket) => {
           tiles.forEach((tile: string) => {
             client.subscribedTiles.delete(tile);
           });
+          console.log(`[WS] Client unsubscribed from ${tiles.length} tiles`);
         }
       }
     } catch (error) {
@@ -100,6 +115,7 @@ wss.on('connection', (ws: WebSocket) => {
   });
 
   ws.on('close', () => {
+    console.log(`[WS] Client disconnected, remaining: ${clients.size - 1}`);
     clients.delete(ws);
   });
 

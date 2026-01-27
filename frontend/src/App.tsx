@@ -88,10 +88,19 @@ function App() {
           try {
             const data = JSON.parse(event.data);
             if (data.type === 'stroke_created' && data.stroke) {
-              setStrokes((prev) => [...prev, data.stroke]);
+              console.log(`[Frontend] Received stroke via WebSocket: ${data.strokeId}`, data.stroke);
+              setStrokes((prev) => {
+                // Проверяем, нет ли уже такого stroke (избегаем дубликатов)
+                const exists = prev.some(s => s.id === data.stroke.id);
+                if (exists) {
+                  console.log(`[Frontend] Stroke ${data.stroke.id} already exists, skipping`);
+                  return prev;
+                }
+                return [...prev, data.stroke];
+              });
             }
           } catch (error) {
-            console.error('Error parsing WebSocket message:', error);
+            console.error('[Frontend] Error parsing WebSocket message:', error);
           }
         };
 
@@ -274,9 +283,8 @@ function App() {
       points.push([currentStroke[i], currentStroke[i + 1]]);
     }
 
-    const stroke: Stroke = {
-      id: crypto.randomUUID(),
-      ts: Date.now(),
+    // Отправляем stroke без id - сервер сам его сгенерирует
+    const strokeData = {
       tool: brush,
       color,
       width,
@@ -284,18 +292,24 @@ function App() {
     };
 
     try {
+      console.log(`[Frontend] Sending stroke to server: ${points.length} points`);
       const response = await fetch(`${API_URL}/strokes`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(stroke),
+        body: JSON.stringify(strokeData),
       });
 
       if (response.ok) {
         const data = await response.json();
-        setStrokes((prev) => [...prev, data.stroke]);
+        console.log(`[Frontend] Stroke saved: ${data.strokeId}, received stroke:`, data.stroke);
+        // Не добавляем stroke вручную - он придет через WebSocket от сервера
+        // Это гарантирует, что все клиенты получат одинаковый stroke с правильным id
+      } else {
+        const errorText = await response.text();
+        console.error(`[Frontend] Failed to save stroke: ${response.status} - ${errorText}`);
       }
     } catch (error) {
-      console.error('Error saving stroke:', error);
+      console.error('[Frontend] Error saving stroke:', error);
     }
 
     setIsDrawing(false);
