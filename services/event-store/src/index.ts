@@ -32,12 +32,22 @@ async function initDb() {
       stroke_id VARCHAR(36) NOT NULL,
       stroke_data JSONB,
       timestamp BIGINT NOT NULL,
-      created_at TIMESTAMP DEFAULT NOW()
+      created_at TIMESTAMP DEFAULT NOW(),
+      -- Денормализованные поля для быстрого поиска по координатам
+      min_x DOUBLE PRECISION,
+      min_y DOUBLE PRECISION,
+      max_x DOUBLE PRECISION,
+      max_y DOUBLE PRECISION
     );
     
     CREATE INDEX IF NOT EXISTS idx_stroke_id ON stroke_events(stroke_id);
     CREATE INDEX IF NOT EXISTS idx_timestamp ON stroke_events(timestamp);
     CREATE INDEX IF NOT EXISTS idx_event_type ON stroke_events(event_type);
+    
+    -- Индекс для быстрого поиска по bbox (для тайлов)
+    -- Используем B-tree индекс для простоты (GIST требует расширение btree_gist)
+    CREATE INDEX IF NOT EXISTS idx_stroke_coords ON stroke_events(min_x, min_y, max_x, max_y) 
+      WHERE event_type = 'stroke_created' AND min_x IS NOT NULL;
   `);
 }
 
@@ -63,6 +73,14 @@ app.post('/strokes', async (req, res) => {
       authorId: body.authorId,
     };
 
+    // Вычисляем bbox для быстрого поиска по тайлам
+    const xs = body.points.map(([x]) => x);
+    const ys = body.points.map(([, y]) => y);
+    const minX = Math.min(...xs);
+    const minY = Math.min(...ys);
+    const maxX = Math.max(...xs);
+    const maxY = Math.max(...ys);
+
     const event: StrokeEvent = {
       type: 'stroke_created',
       strokeId,
@@ -71,8 +89,8 @@ app.post('/strokes', async (req, res) => {
     };
 
     await pool.query(
-      'INSERT INTO stroke_events (event_type, stroke_id, stroke_data, timestamp) VALUES ($1, $2, $3, $4)',
-      [event.type, event.strokeId, JSON.stringify(stroke), event.timestamp]
+      'INSERT INTO stroke_events (event_type, stroke_id, stroke_data, timestamp, min_x, min_y, max_x, max_y) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
+      [event.type, event.strokeId, JSON.stringify(stroke), event.timestamp, minX, minY, maxX, maxY]
     );
 
     const eventJson = JSON.stringify(event);

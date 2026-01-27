@@ -54,8 +54,23 @@ async function initDb() {
     
     CREATE INDEX IF NOT EXISTS idx_tile_coords ON tile_snapshots(tile_x, tile_y);
     
-    -- GIN индекс для быстрого поиска по JSONB полям
-    CREATE INDEX IF NOT EXISTS idx_stroke_data_gin ON stroke_events USING GIN (stroke_data);
+    -- Убеждаемся что поля bbox существуют в stroke_events (если их еще нет)
+    DO $$ 
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                     WHERE table_name = 'stroke_events' AND column_name = 'min_x') THEN
+        ALTER TABLE stroke_events 
+          ADD COLUMN min_x DOUBLE PRECISION,
+          ADD COLUMN min_y DOUBLE PRECISION,
+          ADD COLUMN max_x DOUBLE PRECISION,
+          ADD COLUMN max_y DOUBLE PRECISION;
+      END IF;
+    END $$;
+    
+    -- Создаем индексы для быстрого поиска по bbox (если их еще нет)
+    -- Используем обычный B-tree индекс вместо GIST для простоты (GIST требует расширение)
+    CREATE INDEX IF NOT EXISTS idx_stroke_coords ON stroke_events(min_x, min_y, max_x, max_y) 
+      WHERE event_type = 'stroke_created' AND min_x IS NOT NULL;
   `);
 }
 
@@ -72,29 +87,46 @@ async function initRedis() {
 
 async function getStrokesForTile(tileX: number, tileY: number, sinceVersion?: number): Promise<Stroke[]> {
   const bbox = getTileBbox(tileX, tileY);
-  
-  // Оптимизированный запрос: используем JSONB функции для фильтрации на уровне БД
-  // Проверяем, есть ли хотя бы одна точка stroke в пределах тайла
+
+  // Оптимизированный запрос: фильтруем по bbox прямо в SQL
+  // Используем проверку пересечения bounding box'ов: stroke пересекается с тайлом если
+  // не (stroke.max_x < tile.x1 OR stroke.min_x >= tile.x2 OR stroke.max_y < tile.y1 OR stroke.min_y >= tile.y2)
   const query = `
     SELECT stroke_data, timestamp
     FROM stroke_events 
     WHERE event_type = 'stroke_created' 
       AND stroke_data->>'hidden' IS DISTINCT FROM 'true'
-      AND EXISTS (
-        SELECT 1 
-        FROM jsonb_array_elements(stroke_data->'points') AS point
-        WHERE (point->>0)::float >= $1 
-          AND (point->>0)::float < $2
-          AND (point->>1)::float >= $3
-          AND (point->>1)::float < $4
-      )
-    ORDER BY timestamp ASC
+      AND min_x IS NOT NULL
+      AND max_x IS NOT NULL
+      AND min_y IS NOT NULL
+      AND max_y IS NOT NULL
+      AND NOT (max_x < $1 OR min_x >= $2 OR max_y < $3 OR min_y >= $4)
+      ${sinceVersion ? 'AND timestamp > $5' : ''}
+    ORDER BY timestamp DESC
+    LIMIT 10000
   `;
 
-  const result = await pool.query(query, [bbox.x1, bbox.x2, bbox.y1, bbox.y2]);
-  const strokes = result.rows.map((row) => row.stroke_data as Stroke);
-  
-  console.log(`[TileService] Tile [${tileX},${tileY}]: found ${strokes.length} strokes (bbox: ${bbox.x1},${bbox.y1} - ${bbox.x2},${bbox.y2})`);
+  const startTime = Date.now();
+  const params = sinceVersion 
+    ? [bbox.x1, bbox.x2, bbox.y1, bbox.y2, sinceVersion]
+    : [bbox.x1, bbox.x2, bbox.y1, bbox.y2];
+  const result = await pool.query(query, params);
+  const queryTime = Date.now() - startTime;
+
+  // Теперь фильтруем только по точкам (bbox может быть больше чем реальные точки)
+  // Но это уже намного меньше данных чем было раньше
+  const filterStartTime = Date.now();
+  const strokes = result.rows
+    .map((row) => row.stroke_data as Stroke)
+    .filter((stroke) => {
+      // Проверяем, есть ли хотя бы одна точка stroke в пределах тайла
+      return stroke.points.some(
+        ([x, y]) => x >= bbox.x1 && x < bbox.x2 && y >= bbox.y1 && y < bbox.y2
+      );
+    });
+  const filterTime = Date.now() - filterStartTime;
+
+  console.log(`[TileService] Tile [${tileX},${tileY}]: found ${strokes.length} strokes from ${result.rows.length} candidates (query: ${queryTime}ms, filter: ${filterTime}ms, bbox: ${bbox.x1},${bbox.y1} - ${bbox.x2},${bbox.y2})`);
   return strokes;
 }
 
@@ -131,13 +163,13 @@ async function renderTileSnapshot(tileX: number, tileY: number, strokes: Stroke[
 
     const style = getBrushStyle(stroke.tool);
     const strokeColor = stroke.tool === 'eraser' ? '#ffffff' : stroke.color;
-    
+
     ctx.strokeStyle = strokeColor;
     ctx.lineWidth = stroke.width;
     ctx.lineCap = style.lineCap;
     ctx.lineJoin = style.lineJoin;
     ctx.globalAlpha = style.opacity;
-    
+
     if (style.dash.length > 0) {
       ctx.setLineDash(style.dash);
     } else {
@@ -197,10 +229,24 @@ app.get('/tiles', async (req, res) => {
 
     console.log(`[TileService] Tiles range: X[${minTileX}..${maxTileX}], Y[${minTileY}..${maxTileY}]`);
 
+    // Ограничиваем количество тайлов в одном запросе (максимум 100)
+    const maxTiles = 100;
+    const tileCount = (maxTileX - minTileX + 1) * (maxTileY - minTileY + 1);
+    if (tileCount > maxTiles) {
+      console.warn(`[TileService] Requested ${tileCount} tiles, limiting to ${maxTiles}`);
+      // Ограничиваем диапазон
+      const maxTileRange = Math.floor(Math.sqrt(maxTiles));
+      const limitedMaxTileX = Math.min(maxTileX, minTileX + maxTileRange - 1);
+      const limitedMaxTileY = Math.min(maxTileY, minTileY + maxTileRange - 1);
+      console.log(`[TileService] Limited range: X[${minTileX}..${limitedMaxTileX}], Y[${minTileY}..${limitedMaxTileY}]`);
+    }
+
     // Собираем все тайлы для параллельной обработки
     const tileCoords: Array<[number, number]> = [];
-    for (let tileX = minTileX; tileX <= maxTileX; tileX++) {
-      for (let tileY = minTileY; tileY <= maxTileY; tileY++) {
+    const finalMaxTileX = tileCount > maxTiles ? Math.min(maxTileX, minTileX + Math.floor(Math.sqrt(maxTiles)) - 1) : maxTileX;
+    const finalMaxTileY = tileCount > maxTiles ? Math.min(maxTileY, minTileY + Math.floor(Math.sqrt(maxTiles)) - 1) : maxTileY;
+    for (let tileX = minTileX; tileX <= finalMaxTileX; tileX++) {
+      for (let tileY = minTileY; tileY <= finalMaxTileY; tileY++) {
         tileCoords.push([tileX, tileY]);
       }
     }
@@ -227,30 +273,30 @@ app.get('/tiles', async (req, res) => {
       } else {
         // Загружаем strokes только если снапшота нет или он устарел
         strokes = await getStrokesForTile(tileX, tileY, sinceVersion);
-        
-        version = latestSnapshot.rows.length > 0 
-          ? parseInt(latestSnapshot.rows[0].version) 
+
+        version = latestSnapshot.rows.length > 0
+          ? parseInt(latestSnapshot.rows[0].version)
           : Date.now();
 
         // Создаем снапшот только если есть strokes
         if (strokes.length > 0) {
           const snapshotVersion = Date.now();
           const snapshotKey = `tile_${tileX}_${tileY}_${snapshotVersion}.png`;
-          
+
           const snapshotBuffer = await renderTileSnapshot(tileX, tileY, strokes);
           await minioClient.putObject(BUCKET_NAME, snapshotKey, snapshotBuffer, snapshotBuffer.length, {
             'Content-Type': 'image/png',
           });
-          
+
           snapshotUrl = `/snapshots/${snapshotKey}`;
-          
+
           // Сохраняем информацию о снапшоте в БД
           await pool.query(
             `INSERT INTO tile_snapshots (tile_x, tile_y, version, snapshot_url) 
              VALUES ($1, $2, $3, $4)`,
             [tileX, tileY, snapshotVersion, snapshotUrl]
           );
-          
+
           version = snapshotVersion;
         }
       }
@@ -278,10 +324,10 @@ app.get('/snapshots/:key', async (req, res) => {
   try {
     const { key } = req.params;
     const object = await minioClient.getObject(BUCKET_NAME, key);
-    
+
     res.setHeader('Content-Type', 'image/png');
     res.setHeader('Cache-Control', 'public, max-age=3600');
-    
+
     object.pipe(res);
   } catch (error: any) {
     if (error.code === 'NoSuchKey') {
