@@ -53,6 +53,9 @@ async function initDb() {
     );
     
     CREATE INDEX IF NOT EXISTS idx_tile_coords ON tile_snapshots(tile_x, tile_y);
+    
+    -- GIN индекс для быстрого поиска по JSONB полям
+    CREATE INDEX IF NOT EXISTS idx_stroke_data_gin ON stroke_events USING GIN (stroke_data);
   `);
 }
 
@@ -70,31 +73,29 @@ async function initRedis() {
 async function getStrokesForTile(tileX: number, tileY: number, sinceVersion?: number): Promise<Stroke[]> {
   const bbox = getTileBbox(tileX, tileY);
   
-  // Загружаем все strokes и фильтруем в коде, так как проверка всех точек в SQL сложна
-  // Можно оптимизировать, загружая только strokes, которые потенциально могут пересекаться с тайлом
+  // Оптимизированный запрос: используем JSONB функции для фильтрации на уровне БД
+  // Проверяем, есть ли хотя бы одна точка stroke в пределах тайла
   const query = `
     SELECT stroke_data, timestamp
     FROM stroke_events 
     WHERE event_type = 'stroke_created' 
       AND stroke_data->>'hidden' IS DISTINCT FROM 'true'
+      AND EXISTS (
+        SELECT 1 
+        FROM jsonb_array_elements(stroke_data->'points') AS point
+        WHERE (point->>0)::float >= $1 
+          AND (point->>0)::float < $2
+          AND (point->>1)::float >= $3
+          AND (point->>1)::float < $4
+      )
     ORDER BY timestamp ASC
   `;
 
-  const result = await pool.query(query);
-  console.log(`[TileService] Loaded ${result.rows.length} total strokes from DB for tile [${tileX},${tileY}]`);
+  const result = await pool.query(query, [bbox.x1, bbox.x2, bbox.y1, bbox.y2]);
+  const strokes = result.rows.map((row) => row.stroke_data as Stroke);
   
-  // Фильтруем strokes, которые пересекаются с тайлом
-  const filtered = result.rows
-    .map((row) => row.stroke_data as Stroke)
-    .filter((stroke) => {
-      // Проверяем, есть ли хотя бы одна точка stroke в пределах тайла
-      return stroke.points.some(
-        ([x, y]) => x >= bbox.x1 && x < bbox.x2 && y >= bbox.y1 && y < bbox.y2
-      );
-    });
-  
-  console.log(`[TileService] Filtered to ${filtered.length} strokes for tile [${tileX},${tileY}] (bbox: ${bbox.x1},${bbox.y1} - ${bbox.x2},${bbox.y2})`);
-  return filtered;
+  console.log(`[TileService] Tile [${tileX},${tileY}]: found ${strokes.length} strokes (bbox: ${bbox.x1},${bbox.y1} - ${bbox.x2},${bbox.y2})`);
+  return strokes;
 }
 
 function getBrushStyle(tool: string): { opacity: number; lineCap: CanvasLineCap; lineJoin: CanvasLineJoin; dash: number[] } {
@@ -196,30 +197,45 @@ app.get('/tiles', async (req, res) => {
 
     console.log(`[TileService] Tiles range: X[${minTileX}..${maxTileX}], Y[${minTileY}..${maxTileY}]`);
 
-    const tiles: TileResponse[] = [];
-
+    // Собираем все тайлы для параллельной обработки
+    const tileCoords: Array<[number, number]> = [];
     for (let tileX = minTileX; tileX <= maxTileX; tileX++) {
       for (let tileY = minTileY; tileY <= maxTileY; tileY++) {
-        const strokes = await getStrokesForTile(tileX, tileY, sinceVersion);
-        console.log(`[TileService] Tile [${tileX},${tileY}]: found ${strokes.length} strokes`);
-        
-        // Проверяем, есть ли уже снапшот для этого тайла
-        let snapshotUrl: string | undefined;
-        const latestSnapshot = await pool.query(
-          `SELECT snapshot_url, version FROM tile_snapshots 
-           WHERE tile_x = $1 AND tile_y = $2 
-           ORDER BY version DESC LIMIT 1`,
-          [tileX, tileY]
-        );
+        tileCoords.push([tileX, tileY]);
+      }
+    }
 
-        // Проверяем, нужно ли обновить снапшот
-        // Если есть снапшот и sinceVersion не указан или совпадает, используем существующий
-        if (latestSnapshot.rows.length > 0 && (!sinceVersion || parseInt(latestSnapshot.rows[0].version) >= sinceVersion)) {
-          snapshotUrl = latestSnapshot.rows[0].snapshot_url;
-        } else if (strokes.length > 0) {
-          // Создаем новый снапшот только если его нет или нужна новая версия
-          const version = Date.now();
-          const snapshotKey = `tile_${tileX}_${tileY}_${version}.png`;
+    // Обрабатываем тайлы параллельно
+    const tilePromises = tileCoords.map(async ([tileX, tileY]) => {
+      // Сначала проверяем снапшот
+      const latestSnapshot = await pool.query(
+        `SELECT snapshot_url, version FROM tile_snapshots 
+         WHERE tile_x = $1 AND tile_y = $2 
+         ORDER BY version DESC LIMIT 1`,
+        [tileX, tileY]
+      );
+
+      let snapshotUrl: string | undefined;
+      let strokes: Stroke[] = [];
+      let version: number;
+
+      // Если есть актуальный снапшот, не загружаем strokes
+      if (latestSnapshot.rows.length > 0 && (!sinceVersion || parseInt(latestSnapshot.rows[0].version) >= sinceVersion)) {
+        snapshotUrl = latestSnapshot.rows[0].snapshot_url;
+        version = parseInt(latestSnapshot.rows[0].version);
+        // Не загружаем strokes, если есть актуальный снапшот
+      } else {
+        // Загружаем strokes только если снапшота нет или он устарел
+        strokes = await getStrokesForTile(tileX, tileY, sinceVersion);
+        
+        version = latestSnapshot.rows.length > 0 
+          ? parseInt(latestSnapshot.rows[0].version) 
+          : Date.now();
+
+        // Создаем снапшот только если есть strokes
+        if (strokes.length > 0) {
+          const snapshotVersion = Date.now();
+          const snapshotKey = `tile_${tileX}_${tileY}_${snapshotVersion}.png`;
           
           const snapshotBuffer = await renderTileSnapshot(tileX, tileY, strokes);
           await minioClient.putObject(BUCKET_NAME, snapshotKey, snapshotBuffer, snapshotBuffer.length, {
@@ -232,23 +248,23 @@ app.get('/tiles', async (req, res) => {
           await pool.query(
             `INSERT INTO tile_snapshots (tile_x, tile_y, version, snapshot_url) 
              VALUES ($1, $2, $3, $4)`,
-            [tileX, tileY, version, snapshotUrl]
+            [tileX, tileY, snapshotVersion, snapshotUrl]
           );
+          
+          version = snapshotVersion;
         }
-
-        const version = latestSnapshot.rows.length > 0 
-          ? parseInt(latestSnapshot.rows[0].version) 
-          : Date.now();
-
-        tiles.push({
-          tileX,
-          tileY,
-          version,
-          snapshotUrl,
-          strokes,
-        });
       }
-    }
+
+      return {
+        tileX,
+        tileY,
+        version,
+        snapshotUrl,
+        strokes, // Отправляем strokes только если нет снапшота или он устарел
+      };
+    });
+
+    const tiles = await Promise.all(tilePromises);
 
     res.json({ tiles });
   } catch (error) {
