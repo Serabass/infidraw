@@ -58,7 +58,6 @@ services:
       - realtime-service
       - metrics-service
       - admin-service
-      - frontend
       - frontend-v2
     restart: unless-stopped
 
@@ -169,18 +168,6 @@ services:
     volumes:
       - ./services/admin-service:/app
       - /app/node_modules
-
-  frontend:
-    build: ./frontend
-    expose:
-      - "5173"
-    environment:
-      VITE_API_URL: /api
-      VITE_WS_URL: ws://localhost/ws
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-    command: npm run dev -- --host
 
   frontend-v2:
     build: ./frontend-v2

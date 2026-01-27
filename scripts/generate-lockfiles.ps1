@@ -8,7 +8,7 @@ $services = @(
     "services/metrics-service",
     "services/admin-service",
     "services/api-gateway",
-    "frontend"
+    "frontend-v2"
 )
 
 Write-Host "Generating package-lock.json files using Docker..." -ForegroundColor Cyan

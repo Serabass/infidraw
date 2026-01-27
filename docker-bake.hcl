@@ -6,7 +6,6 @@ group "default" {
     "tile-service",
     "metrics-service",
     "admin-service",
-    "frontend",
     "frontend-v2"
   ]
 }
@@ -65,14 +64,6 @@ target "admin-service" {
   tags = ["${REGISTRY}/infidraw/admin-service:${TAG}"]
   cache-to = ["type=inline"]
   cache-from = ["type=registry,ref=${REGISTRY}/infidraw/admin-service:buildcache"]
-}
-
-target "frontend" {
-  context = "./frontend"
-  dockerfile = "Dockerfile"
-  tags = ["${REGISTRY}/infidraw/frontend:${TAG}"]
-  cache-to = ["type=inline"]
-  cache-from = ["type=registry,ref=${REGISTRY}/infidraw/frontend:buildcache"]
 }
 
 target "frontend-v2" {

@@ -13,7 +13,7 @@ Write-Host "Registry: reg.serabass.kz" -ForegroundColor Yellow
 
 # Build all images with specified tag
 # Переопределяем теги для всех targets
-$targets = @("event-store", "api-gateway", "realtime-service", "tile-service", "metrics-service", "admin-service", "frontend", "frontend-v2")
+$targets = @("event-store", "api-gateway", "realtime-service", "tile-service", "metrics-service", "admin-service", "frontend-v2")
 $setArgs = @()
 foreach ($target in $targets) {
     $setArgs += "--set"

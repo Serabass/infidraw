@@ -19,7 +19,6 @@ replicas = {
   tile-service     = 2
   metrics-service  = 1
   admin-service    = 1
-  frontend         = 1
   frontend-v2      = 2
   nginx            = 2
 }
