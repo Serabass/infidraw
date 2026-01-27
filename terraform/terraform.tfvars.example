@@ -1,0 +1,30 @@
+# Example terraform.tfvars file
+# Copy this to terraform.tfvars and fill in your values
+
+kubeconfig_path    = "~/.kube/config"
+kubeconfig_context  = ""
+registry            = "reg.serabass.kz"
+image_tag           = "latest"
+
+postgres_password   = "change-me-in-production"
+minio_root_user     = "minioadmin"
+minio_root_password = "change-me-in-production"
+admin_token         = "change-me-in-production"
+
+# Replicas configuration
+replicas = {
+  event-store      = 2
+  api-gateway      = 2
+  realtime-service = 2
+  tile-service     = 2
+  metrics-service  = 1
+  admin-service    = 1
+  frontend         = 1
+  frontend-v2      = 2
+  nginx            = 2
+}
+
+# Ingress configuration
+enable_ingress = true
+ingress_class  = "traefik"  # для k3s используется traefik
+ingress_host   = "infidraw.serabass.org"
