@@ -257,8 +257,9 @@ app.get('/rooms', async (req, res) => {
       pool.query('SELECT DISTINCT room_id FROM stroke_events'),
     ]);
     const byId = new Map<string, { name: string; updatedAt: number }>();
-    for (const row of roomsResult.rows as Array<{ room_id: string; name: string; updated_at: string }>) {
-      byId.set(row.room_id, { name: row.name, updatedAt: parseInt(row.updated_at, 10) });
+    for (const row of roomsResult.rows as Array<{ room_id: string; name: string; updated_at: string | number }>) {
+      const updatedAt = Number(row.updated_at) || 0;
+      byId.set(row.room_id, { name: row.name, updatedAt });
     }
     const roomIds = new Set<string>(usedResult.rows.map((r: { room_id: string }) => r.room_id));
     for (const id of roomIds) {
