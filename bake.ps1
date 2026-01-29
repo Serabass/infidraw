@@ -14,10 +14,10 @@ $executionTime = $endTime - $startTime
 
 Write-Output ("Elapsed: {0:hh\:mm\:ss\.fff}" -f [TimeSpan]::FromSeconds($executionTime.TotalSeconds))
 
-kubectl rollout restart -n infidraw deployment/event-store
-kubectl rollout restart -n infidraw deployment/api-gateway
-kubectl rollout restart -n infidraw deployment/realtime-service
-kubectl rollout restart -n infidraw deployment/tile-service
-kubectl rollout restart -n infidraw deployment/metrics-service
-kubectl rollout restart -n infidraw deployment/admin-service
-kubectl rollout restart -n infidraw deployment/frontend-v2
+$deployments = @(
+  "event-store", "api-gateway", "realtime-service", "tile-service",
+  "metrics-service", "admin-service", "frontend-v2"
+)
+$deployList = $deployments | ForEach-Object { "deployment/$_" }
+kubectl rollout restart -n infidraw $deployList
+kubectl rollout status -n infidraw $deployList --timeout=120s

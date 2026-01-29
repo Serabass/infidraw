@@ -6,7 +6,7 @@ import cors from 'cors';
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 
 const redisClient = createClient({
   url: process.env.REDIS_URL,
@@ -61,6 +61,17 @@ app.use(
 );
 
 app.use(
+  '/api/rooms',
+  createProxyMiddleware({
+    target: process.env.EVENT_STORE_URL || 'http://event-store:3000',
+    changeOrigin: true,
+    pathRewrite: {
+      '^/api/rooms': '/rooms',
+    },
+  })
+);
+
+app.use(
   '/api/tiles',
   createProxyMiddleware({
     target: process.env.TILE_SERVICE_URL || 'http://tile-service:3000',
@@ -83,9 +94,9 @@ app.use(
 );
 
 app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'ok', 
-    services: ['event-store', 'tile-service', 'realtime-service', 'metrics-service'] 
+  res.json({
+    status: 'ok',
+    services: ['event-store', 'tile-service', 'realtime-service', 'metrics-service']
   });
 });
 
@@ -103,4 +114,8 @@ async function start() {
   }
 }
 
-start();
+if (process.env.NODE_ENV !== 'test') {
+  start();
+}
+
+export { app };

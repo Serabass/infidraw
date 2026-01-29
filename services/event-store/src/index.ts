@@ -6,7 +6,7 @@ import { z } from 'zod';
 import type { Stroke, StrokeEvent } from './types';
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -74,6 +74,14 @@ async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_event_type ON stroke_events(event_type);
     CREATE INDEX IF NOT EXISTS idx_stroke_coords ON stroke_events(min_x, min_y, max_x, max_y) 
       WHERE event_type = 'stroke_created' AND min_x IS NOT NULL;
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS rooms (
+      room_id VARCHAR(64) PRIMARY KEY,
+      name VARCHAR(255) NOT NULL DEFAULT 'Room',
+      updated_at BIGINT NOT NULL DEFAULT 0
+    );
   `);
 }
 
@@ -159,7 +167,7 @@ app.get('/strokes/:id', async (req, res) => {
   }
 });
 
-// GET /events - получить события (для реалтайм синхронизации и загрузки после F5)
+// GET /events - получить события и название комнаты (roomName по тому же маршруту, что и /api/events)
 app.get('/events', async (req, res) => {
   try {
     const roomId = (req.query.roomId as string) || DEFAULT_ROOM;
@@ -167,7 +175,7 @@ app.get('/events', async (req, res) => {
     const limitParam = parseInt(req.query.limit as string);
     const limit = Number.isNaN(limitParam)
       ? (since === 0 ? 10000 : 100)
-      : Math.min(limitParam, 10000);
+      : Math.min(Math.max(0, limitParam), 10000);
 
     const result = await pool.query(
       `SELECT event_type, stroke_id, stroke_data, timestamp 
@@ -185,7 +193,16 @@ app.get('/events', async (req, res) => {
       timestamp: parseInt(row.timestamp),
     }));
 
-    res.json({ events });
+    let roomName = `Room ${roomId}`;
+    const nameRow = await pool.query(
+      'SELECT name FROM rooms WHERE room_id = $1',
+      [roomId]
+    );
+    if (nameRow.rows.length > 0) {
+      roomName = nameRow.rows[0].name;
+    }
+
+    res.json({ events, roomId, roomName });
   } catch (error) {
     console.error('Error fetching events:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -232,6 +249,114 @@ app.post('/strokes/:id/erase', async (req, res) => {
   }
 });
 
+// GET /rooms — список всех комнат (из таблицы rooms + room_id из stroke_events без записи в rooms)
+app.get('/rooms', async (req, res) => {
+  try {
+    const [roomsResult, usedResult] = await Promise.all([
+      pool.query('SELECT room_id, name, updated_at FROM rooms ORDER BY updated_at DESC'),
+      pool.query('SELECT DISTINCT room_id FROM stroke_events'),
+    ]);
+    const byId = new Map<string, { name: string; updatedAt: number }>();
+    for (const row of roomsResult.rows as Array<{ room_id: string; name: string; updated_at: string }>) {
+      byId.set(row.room_id, { name: row.name, updatedAt: parseInt(row.updated_at, 10) });
+    }
+    const roomIds = new Set<string>(usedResult.rows.map((r: { room_id: string }) => r.room_id));
+    for (const id of roomIds) {
+      if (!byId.has(id)) {
+        byId.set(id, { name: `Room ${id}`, updatedAt: 0 });
+      }
+    }
+    const rooms = Array.from(byId.entries()).map(([roomId, data]) => ({
+      roomId,
+      name: data.name,
+      updatedAt: data.updatedAt,
+    }));
+    rooms.sort((a, b) => b.updatedAt - a.updatedAt);
+    res.json({ rooms });
+  } catch (error) {
+    console.error('Error listing rooms:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+const RoomNameSchema = z.object({ name: z.string().min(1).max(255) });
+
+// ВАЖНО: более специфичный маршрут /rename — первым, иначе /rooms/1/rename матчится как /rooms/:roomId с roomId="1/rename"
+app.get('/rooms/:roomId/rename', async (req, res) => {
+  const roomId = req.params.roomId || DEFAULT_ROOM;
+  const raw = (req.query.name as string) || '';
+  const name = raw.trim();
+  if (!name) {
+    return res.status(400).json({ error: 'Query param name is required' });
+  }
+  if (name.length > 255) {
+    return res.status(400).json({ error: 'Name too long' });
+  }
+  try {
+    const updatedAt = Date.now();
+    await pool.query(
+      `INSERT INTO rooms (room_id, name, updated_at) VALUES ($1, $2, $3)
+       ON CONFLICT (room_id) DO UPDATE SET name = $2, updated_at = $3`,
+      [roomId, name, updatedAt]
+    );
+    const eventJson = JSON.stringify({ type: 'room_renamed', roomId, name, updatedAt });
+    await redisClient.publish('room_events', eventJson);
+    console.log(`[EventStore] Room renamed (GET): ${roomId} -> "${name}"`);
+    res.json({ roomId, name, updatedAt });
+  } catch (error) {
+    console.error('Error updating room name:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET /rooms/:roomId - получить название комнаты
+app.get('/rooms/:roomId', async (req, res) => {
+  try {
+    const roomId = req.params.roomId || DEFAULT_ROOM;
+    const result = await pool.query(
+      'SELECT room_id, name, updated_at FROM rooms WHERE room_id = $1',
+      [roomId]
+    );
+    if (result.rows.length === 0) {
+      return res.json({ roomId, name: `Room ${roomId}`, updatedAt: 0 });
+    }
+    const row = result.rows[0];
+    res.json({ roomId: row.room_id, name: row.name, updatedAt: parseInt(row.updated_at) });
+  } catch (error) {
+    console.error('Error fetching room:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+async function handleSetRoomName(req: express.Request, res: express.Response): Promise<void> {
+  try {
+    const roomId = req.params.roomId || DEFAULT_ROOM;
+    const body = RoomNameSchema.parse(req.body);
+    const name = body.name.trim();
+    const updatedAt = Date.now();
+    await pool.query(
+      `INSERT INTO rooms (room_id, name, updated_at) VALUES ($1, $2, $3)
+       ON CONFLICT (room_id) DO UPDATE SET name = $2, updated_at = $3`,
+      [roomId, name, updatedAt]
+    );
+    const eventJson = JSON.stringify({ type: 'room_renamed', roomId, name, updatedAt });
+    await redisClient.publish('room_events', eventJson);
+    console.log(`[EventStore] Room renamed: ${roomId} -> "${name}"`);
+    res.json({ roomId, name, updatedAt });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      res.status(400).json({ error: 'Invalid name', details: error.errors });
+      return;
+    }
+    console.error('Error updating room name:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+}
+
+// PUT и POST — изменить название комнаты (если прокси вдруг пропустит)
+app.put('/rooms/:roomId', handleSetRoomName);
+app.post('/rooms/:roomId', handleSetRoomName);
+
 const PORT = process.env.PORT || 3000;
 
 async function start() {
@@ -247,4 +372,8 @@ async function start() {
   }
 }
 
-start();
+if (process.env.NODE_ENV !== 'test') {
+  start();
+}
+
+export { app };

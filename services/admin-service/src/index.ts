@@ -4,7 +4,7 @@ import { createClient } from 'redis';
 import * as Minio from 'minio';
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -40,7 +40,7 @@ app.post('/admin/cleanup-old', requireAdmin, async (req, res) => {
   try {
     const days = parseInt(req.body.days || req.query.days as string || '7');
     const cutoffTimestamp = Date.now() - days * 24 * 60 * 60 * 1000;
-    
+
     const result = await pool.query(
       `DELETE FROM stroke_events 
        WHERE timestamp < $1 
@@ -81,7 +81,7 @@ app.post('/admin/cleanup-all', requireAdmin, async (req, res) => {
     try {
       const objects = minioClient.listObjects(BUCKET_NAME, '', true);
       const objectsToDelete: string[] = [];
-      
+
       for await (const obj of objects) {
         if (obj.name) {
           objectsToDelete.push(obj.name);
@@ -164,7 +164,7 @@ app.get('/health', (req, res) => {
 
 // Корневой эндпоинт для проверки доступности
 app.get('/', (req, res) => {
-  res.json({ 
+  res.json({
     service: 'admin-service',
     status: 'running',
     endpoints: {
@@ -198,4 +198,8 @@ async function start() {
   }
 }
 
-start();
+if (process.env.NODE_ENV !== 'test') {
+  start();
+}
+
+export { app };

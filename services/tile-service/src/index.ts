@@ -6,7 +6,7 @@ import { createCanvas } from 'canvas';
 import type { Stroke, TileResponse } from './types';
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 
 const TILE_SIZE = parseInt(process.env.TILE_SIZE || '512');
 
@@ -123,7 +123,7 @@ async function getStrokesForTile(tileX: number, tileY: number, roomId: string, s
   `;
 
   const startTime = Date.now();
-  const params = sinceVersion 
+  const params = sinceVersion
     ? [rid, bbox.x1, bbox.x2, bbox.y1, bbox.y2, sinceVersion]
     : [rid, bbox.x1, bbox.x2, bbox.y1, bbox.y2];
   const result = await pool.query(query, params);
@@ -366,4 +366,8 @@ async function start() {
   }
 }
 
-start();
+if (process.env.NODE_ENV !== 'test') {
+  start();
+}
+
+export { app };

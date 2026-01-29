@@ -4,7 +4,7 @@ import { createClient } from 'redis';
 import * as Minio from 'minio';
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -92,7 +92,7 @@ async function getMinIOMetrics(): Promise<MinIOMetrics> {
     let objectCount = 0;
 
     const objects = minioClient.listObjects(BUCKET_NAME, '', true);
-    
+
     for await (const obj of objects) {
       if (obj.size) {
         totalSize += obj.size;
@@ -422,4 +422,8 @@ async function start() {
   }
 }
 
-start();
+if (process.env.NODE_ENV !== 'test') {
+  start();
+}
+
+export { app };

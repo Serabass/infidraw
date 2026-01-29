@@ -52,7 +52,7 @@ async function initRedis() {
     try {
       const event: StrokeEvent = JSON.parse(message);
       console.log(`[Redis] Received stroke event: ${event.type}, strokeId: ${event.strokeId}`);
-      
+
       const messageRoomId = (event as any).roomId || '1';
       if (event.type === 'stroke_created' && event.stroke) {
         const tiles = getTilesForStroke(event.stroke);
@@ -80,8 +80,27 @@ async function initRedis() {
       console.error('Error processing stroke event:', error);
     }
   });
-  
-  console.log('[Redis] Subscribed to stroke_events channel');
+
+  await subscriber.subscribe('room_events', (message, channel) => {
+    try {
+      const data = JSON.parse(message);
+      if (data.type === 'room_renamed' && data.roomId && typeof data.name === 'string') {
+        const messageRoomId = data.roomId;
+        let notifiedCount = 0;
+        for (const [ws, client] of clients.entries()) {
+          if ((client.roomId || '1') === messageRoomId && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify(data));
+            notifiedCount++;
+          }
+        }
+        console.log(`[Redis] Notified ${notifiedCount} clients (room=${messageRoomId}) about room_renamed -> "${data.name}"`);
+      }
+    } catch (error) {
+      console.error('Error processing room event:', error);
+    }
+  });
+
+  console.log('[Redis] Subscribed to stroke_events and room_events channels');
 }
 
 wss.on('connection', (ws: WebSocket) => {
@@ -153,4 +172,8 @@ async function start() {
   }
 }
 
-start();
+if (process.env.NODE_ENV !== 'test') {
+  start();
+}
+
+export { app };
