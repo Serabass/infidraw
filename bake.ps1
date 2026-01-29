@@ -18,6 +18,7 @@ $deployments = @(
   "event-store", "api-gateway", "realtime-service", "tile-service",
   "metrics-service", "admin-service", "frontend-v2"
 )
+
 $deployList = $deployments | ForEach-Object { "deployment/$_" }
 kubectl rollout restart -n infidraw $deployList
 kubectl rollout status -n infidraw $deployList --timeout=120s
