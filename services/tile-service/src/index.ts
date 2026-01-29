@@ -41,20 +41,33 @@ function getTileBbox(tileX: number, tileY: number): { x1: number; y1: number; x2
   };
 }
 
+const DEFAULT_ROOM = '1';
+
 async function initDb() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS tile_snapshots (
+      room_id VARCHAR(64) NOT NULL DEFAULT '1',
       tile_x INTEGER NOT NULL,
       tile_y INTEGER NOT NULL,
       version BIGINT NOT NULL,
       snapshot_url TEXT,
       created_at TIMESTAMP DEFAULT NOW(),
-      PRIMARY KEY (tile_x, tile_y, version)
+      PRIMARY KEY (room_id, tile_x, tile_y, version)
     );
+  `);
+  await pool.query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'tile_snapshots' AND column_name = 'room_id') THEN
+        ALTER TABLE tile_snapshots ADD COLUMN room_id VARCHAR(64) NOT NULL DEFAULT '1';
+        ALTER TABLE tile_snapshots DROP CONSTRAINT IF EXISTS tile_snapshots_pkey;
+        ALTER TABLE tile_snapshots ADD PRIMARY KEY (room_id, tile_x, tile_y, version);
+      END IF;
+    END $$;
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_tile_coords ON tile_snapshots(room_id, tile_x, tile_y);
     
-    CREATE INDEX IF NOT EXISTS idx_tile_coords ON tile_snapshots(tile_x, tile_y);
-    
-    -- Убеждаемся что поля bbox существуют в stroke_events (если их еще нет)
     DO $$ 
     BEGIN
       IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
@@ -67,10 +80,15 @@ async function initDb() {
       END IF;
     END $$;
     
-    -- Создаем индексы для быстрого поиска по bbox (если их еще нет)
-    -- Используем обычный B-tree индекс вместо GIST для простоты (GIST требует расширение)
     CREATE INDEX IF NOT EXISTS idx_stroke_coords ON stroke_events(min_x, min_y, max_x, max_y) 
       WHERE event_type = 'stroke_created' AND min_x IS NOT NULL;
+    
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'stroke_events' AND column_name = 'room_id') THEN
+        ALTER TABLE stroke_events ADD COLUMN room_id VARCHAR(64) NOT NULL DEFAULT '1';
+      END IF;
+    END $$;
   `);
 }
 
@@ -85,31 +103,29 @@ async function initRedis() {
   await redisClient.connect();
 }
 
-async function getStrokesForTile(tileX: number, tileY: number, sinceVersion?: number): Promise<Stroke[]> {
+async function getStrokesForTile(tileX: number, tileY: number, roomId: string, sinceVersion?: number): Promise<Stroke[]> {
   const bbox = getTileBbox(tileX, tileY);
+  const rid = roomId || DEFAULT_ROOM;
 
-  // Оптимизированный запрос: фильтруем по bbox прямо в SQL
-  // Используем проверку пересечения bounding box'ов: stroke пересекается с тайлом если
-  // не (stroke.max_x < tile.x1 OR stroke.min_x >= tile.x2 OR stroke.max_y < tile.y1 OR stroke.min_y >= tile.y2)
   const query = `
     SELECT stroke_data, timestamp
     FROM stroke_events 
-    WHERE event_type = 'stroke_created' 
+    WHERE room_id = $1 AND event_type = 'stroke_created' 
       AND stroke_data->>'hidden' IS DISTINCT FROM 'true'
       AND min_x IS NOT NULL
       AND max_x IS NOT NULL
       AND min_y IS NOT NULL
       AND max_y IS NOT NULL
-      AND NOT (max_x < $1 OR min_x >= $2 OR max_y < $3 OR min_y >= $4)
-      ${sinceVersion ? 'AND timestamp > $5' : ''}
+      AND NOT (max_x < $2 OR min_x >= $3 OR max_y < $4 OR min_y >= $5)
+      ${sinceVersion ? 'AND timestamp > $6' : ''}
     ORDER BY timestamp DESC
     LIMIT 10000
   `;
 
   const startTime = Date.now();
   const params = sinceVersion 
-    ? [bbox.x1, bbox.x2, bbox.y1, bbox.y2, sinceVersion]
-    : [bbox.x1, bbox.x2, bbox.y1, bbox.y2];
+    ? [rid, bbox.x1, bbox.x2, bbox.y1, bbox.y2, sinceVersion]
+    : [rid, bbox.x1, bbox.x2, bbox.y1, bbox.y2];
   const result = await pool.query(query, params);
   const queryTime = Date.now() - startTime;
 
@@ -212,13 +228,14 @@ async function renderTileSnapshot(tileX: number, tileY: number, strokes: Stroke[
 // GET /tiles - получить тайлы для области
 app.get('/tiles', async (req, res) => {
   try {
+    const roomId = (req.query.roomId as string) || DEFAULT_ROOM;
     const x1 = parseFloat(req.query.x1 as string);
     const y1 = parseFloat(req.query.y1 as string);
     const x2 = parseFloat(req.query.x2 as string);
     const y2 = parseFloat(req.query.y2 as string);
     const sinceVersion = req.query.sinceVersion ? parseInt(req.query.sinceVersion as string) : undefined;
 
-    console.log(`[TileService] GET /tiles: x1=${x1}, y1=${y1}, x2=${x2}, y2=${y2}`);
+    console.log(`[TileService] GET /tiles: room=${roomId}, x1=${x1}, y1=${y1}, x2=${x2}, y2=${y2}`);
 
     if (isNaN(x1) || isNaN(y1) || isNaN(x2) || isNaN(y2)) {
       return res.status(400).json({ error: 'Invalid coordinates' });
@@ -253,35 +270,30 @@ app.get('/tiles', async (req, res) => {
 
     // Обрабатываем тайлы параллельно
     const tilePromises = tileCoords.map(async ([tileX, tileY]) => {
-      // Сначала проверяем снапшот
       const latestSnapshot = await pool.query(
         `SELECT snapshot_url, version FROM tile_snapshots 
-         WHERE tile_x = $1 AND tile_y = $2 
+         WHERE room_id = $1 AND tile_x = $2 AND tile_y = $3 
          ORDER BY version DESC LIMIT 1`,
-        [tileX, tileY]
+        [roomId, tileX, tileY]
       );
 
       let snapshotUrl: string | undefined;
       let strokes: Stroke[] = [];
       let version: number;
 
-      // Если есть актуальный снапшот, не загружаем strokes
       if (latestSnapshot.rows.length > 0 && (!sinceVersion || parseInt(latestSnapshot.rows[0].version) >= sinceVersion)) {
         snapshotUrl = latestSnapshot.rows[0].snapshot_url;
         version = parseInt(latestSnapshot.rows[0].version);
-        // Не загружаем strokes, если есть актуальный снапшот
       } else {
-        // Загружаем strokes только если снапшота нет или он устарел
-        strokes = await getStrokesForTile(tileX, tileY, sinceVersion);
+        strokes = await getStrokesForTile(tileX, tileY, roomId, sinceVersion);
 
         version = latestSnapshot.rows.length > 0
           ? parseInt(latestSnapshot.rows[0].version)
           : Date.now();
 
-        // Создаем снапшот только если есть strokes
         if (strokes.length > 0) {
           const snapshotVersion = Date.now();
-          const snapshotKey = `tile_${tileX}_${tileY}_${snapshotVersion}.png`;
+          const snapshotKey = `room_${roomId}/tile_${tileX}_${tileY}_${snapshotVersion}.png`;
 
           const snapshotBuffer = await renderTileSnapshot(tileX, tileY, strokes);
           await minioClient.putObject(BUCKET_NAME, snapshotKey, snapshotBuffer, snapshotBuffer.length, {
@@ -290,11 +302,10 @@ app.get('/tiles', async (req, res) => {
 
           snapshotUrl = `/snapshots/${snapshotKey}`;
 
-          // Сохраняем информацию о снапшоте в БД
           await pool.query(
-            `INSERT INTO tile_snapshots (tile_x, tile_y, version, snapshot_url) 
-             VALUES ($1, $2, $3, $4)`,
-            [tileX, tileY, snapshotVersion, snapshotUrl]
+            `INSERT INTO tile_snapshots (room_id, tile_x, tile_y, version, snapshot_url) 
+             VALUES ($1, $2, $3, $4, $5)`,
+            [roomId, tileX, tileY, snapshotVersion, snapshotUrl]
           );
 
           version = snapshotVersion;
@@ -319,10 +330,10 @@ app.get('/tiles', async (req, res) => {
   }
 });
 
-// GET /snapshots/:key - отдать снапшот напрямую из MinIO
-app.get('/snapshots/:key', async (req, res) => {
+// GET /snapshots/:key - отдать снапшот из MinIO (key может содержать room_1/tile_...)
+app.get(/^\/snapshots\/(.+)$/, async (req, res) => {
   try {
-    const { key } = req.params;
+    const key = (req.params as { 0: string })[0];
     const object = await minioClient.getObject(BUCKET_NAME, key);
 
     res.setHeader('Content-Type', 'image/png');

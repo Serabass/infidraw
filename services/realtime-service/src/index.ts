@@ -16,6 +16,7 @@ const wss = new WebSocketServer({ port: WS_PORT, host: '0.0.0.0', path: '/ws' })
 interface Client {
   ws: WebSocket;
   subscribedTiles: Set<string>;
+  roomId: string;
 }
 
 const clients = new Map<WebSocket, Client>();
@@ -52,23 +53,28 @@ async function initRedis() {
       const event: StrokeEvent = JSON.parse(message);
       console.log(`[Redis] Received stroke event: ${event.type}, strokeId: ${event.strokeId}`);
       
+      const messageRoomId = (event as any).roomId || '1';
       if (event.type === 'stroke_created' && event.stroke) {
         const tiles = getTilesForStroke(event.stroke);
-        console.log(`[Redis] Stroke affects tiles: ${tiles.join(', ')}, tool=${event.stroke.tool}, points=${event.stroke.points.length}, total clients: ${clients.size}`);
-        
         let notifiedCount = 0;
         for (const [ws, client] of clients.entries()) {
-          // Отправляем событие если клиент подписан на хотя бы один тайл, 
-          // или если клиент не подписан ни на что (для совместимости)
-          const shouldNotify = client.subscribedTiles.size === 0 || 
-                              tiles.some((tile) => client.subscribedTiles.has(tile));
-          
+          const sameRoom = (client.roomId || '1') === messageRoomId;
+          const shouldNotify = sameRoom && (client.subscribedTiles.size === 0 || tiles.some((tile) => client.subscribedTiles.has(tile)));
           if (shouldNotify && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify(event));
             notifiedCount++;
           }
         }
-        console.log(`[Redis] Notified ${notifiedCount} clients about stroke ${event.strokeId} (tool: ${event.stroke.tool})`);
+        console.log(`[Redis] Notified ${notifiedCount} clients (room=${messageRoomId}) about stroke ${event.strokeId}`);
+      } else if (event.type === 'stroke_erased') {
+        let notifiedCount = 0;
+        for (const [ws, client] of clients.entries()) {
+          if ((client.roomId || '1') === messageRoomId && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify(event));
+            notifiedCount++;
+          }
+        }
+        console.log(`[Redis] Notified ${notifiedCount} clients (room=${messageRoomId}) about stroke_erased ${event.strokeId}`);
       }
     } catch (error) {
       console.error('Error processing stroke event:', error);
@@ -83,6 +89,7 @@ wss.on('connection', (ws: WebSocket) => {
   const client: Client = {
     ws,
     subscribedTiles: new Set(),
+    roomId: '1',
   };
 
   clients.set(ws, client);
@@ -93,6 +100,10 @@ wss.on('connection', (ws: WebSocket) => {
       console.log(`[WS] Received message from client: ${message.type}`);
 
       if (message.type === 'subscribe') {
+        if (typeof message.roomId === 'string') {
+          client.roomId = message.roomId;
+          console.log(`[WS] Client room: ${client.roomId}`);
+        }
         const { tiles } = message;
         if (Array.isArray(tiles)) {
           tiles.forEach((tile: string) => {
