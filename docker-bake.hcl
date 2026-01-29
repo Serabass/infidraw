@@ -23,7 +23,10 @@ target "event-store" {
   dockerfile = "Dockerfile"
   tags = ["${REGISTRY}/infidraw/event-store:${TAG}"]
   cache-to = ["type=inline"]
-  cache-from = ["type=registry,ref=${REGISTRY}/infidraw/event-store:buildcache"]
+  cache-from = [
+    "type=registry,ref=${REGISTRY}/infidraw/event-store:buildcache",
+    "type=registry,ref=${REGISTRY}/infidraw/event-store:latest",
+  ]
 }
 
 target "api-gateway" {
@@ -31,7 +34,10 @@ target "api-gateway" {
   dockerfile = "Dockerfile"
   tags = ["${REGISTRY}/infidraw/api-gateway:${TAG}"]
   cache-to = ["type=inline"]
-  cache-from = ["type=registry,ref=${REGISTRY}/infidraw/api-gateway:buildcache"]
+  cache-from = [
+    "type=registry,ref=${REGISTRY}/infidraw/api-gateway:buildcache",
+    "type=registry,ref=${REGISTRY}/infidraw/api-gateway:latest",
+  ]
 }
 
 target "realtime-service" {
@@ -39,7 +45,10 @@ target "realtime-service" {
   dockerfile = "Dockerfile"
   tags = ["${REGISTRY}/infidraw/realtime-service:${TAG}"]
   cache-to = ["type=inline"]
-  cache-from = ["type=registry,ref=${REGISTRY}/infidraw/realtime-service:buildcache"]
+  cache-from = [
+    "type=registry,ref=${REGISTRY}/infidraw/realtime-service:buildcache",
+    "type=registry,ref=${REGISTRY}/infidraw/realtime-service:latest",
+  ]
 }
 
 target "tile-service" {
@@ -47,7 +56,10 @@ target "tile-service" {
   dockerfile = "Dockerfile"
   tags = ["${REGISTRY}/infidraw/tile-service:${TAG}"]
   cache-to = ["type=inline"]
-  cache-from = ["type=registry,ref=${REGISTRY}/infidraw/tile-service:buildcache"]
+  cache-from = [
+    "type=registry,ref=${REGISTRY}/infidraw/tile-service:buildcache",
+    "type=registry,ref=${REGISTRY}/infidraw/tile-service:latest",
+  ]
 }
 
 target "metrics-service" {
@@ -55,7 +67,10 @@ target "metrics-service" {
   dockerfile = "Dockerfile"
   tags = ["${REGISTRY}/infidraw/metrics-service:${TAG}"]
   cache-to = ["type=inline"]
-  cache-from = ["type=registry,ref=${REGISTRY}/infidraw/metrics-service:buildcache"]
+  cache-from = [
+    "type=registry,ref=${REGISTRY}/infidraw/metrics-service:buildcache",
+    "type=registry,ref=${REGISTRY}/infidraw/metrics-service:latest",
+  ]
 }
 
 target "admin-service" {
@@ -63,7 +78,10 @@ target "admin-service" {
   dockerfile = "Dockerfile"
   tags = ["${REGISTRY}/infidraw/admin-service:${TAG}"]
   cache-to = ["type=inline"]
-  cache-from = ["type=registry,ref=${REGISTRY}/infidraw/admin-service:buildcache"]
+  cache-from = [
+    "type=registry,ref=${REGISTRY}/infidraw/admin-service:buildcache",
+    "type=registry,ref=${REGISTRY}/infidraw/admin-service:latest",
+  ]
 }
 
 target "frontend-v2" {
@@ -71,5 +89,8 @@ target "frontend-v2" {
   dockerfile = "Dockerfile"
   tags = ["${REGISTRY}/infidraw/frontend-v2:${TAG}"]
   cache-to = ["type=inline"]
-  cache-from = ["type=registry,ref=${REGISTRY}/infidraw/frontend-v2:buildcache"]
+  cache-from = [
+    "type=registry,ref=${REGISTRY}/infidraw/frontend-v2:buildcache",
+    "type=registry,ref=${REGISTRY}/infidraw/frontend-v2:latest",
+  ]
 }
