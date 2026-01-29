@@ -74,6 +74,7 @@ async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_event_type ON stroke_events(event_type);
     CREATE INDEX IF NOT EXISTS idx_stroke_coords ON stroke_events(min_x, min_y, max_x, max_y) 
       WHERE event_type = 'stroke_created' AND min_x IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_stroke_events_room_timestamp ON stroke_events(room_id, timestamp);
   `);
 
   await pool.query(`
@@ -177,14 +178,17 @@ app.get('/events', async (req, res) => {
       ? (since === 0 ? 10000 : 100)
       : Math.min(Math.max(0, limitParam), 10000);
 
-    const result = await pool.query(
-      `SELECT event_type, stroke_id, stroke_data, timestamp 
-       FROM stroke_events 
-       WHERE room_id = $1 AND timestamp > $2 
-       ORDER BY timestamp ASC 
-       LIMIT $3`,
-      [roomId, since, limit]
-    );
+    const [result, nameRow] = await Promise.all([
+      pool.query(
+        `SELECT event_type, stroke_id, stroke_data, timestamp 
+         FROM stroke_events 
+         WHERE room_id = $1 AND timestamp > $2 
+         ORDER BY timestamp ASC 
+         LIMIT $3`,
+        [roomId, since, limit]
+      ),
+      pool.query('SELECT name FROM rooms WHERE room_id = $1', [roomId]),
+    ]);
 
     const events: StrokeEvent[] = result.rows.map((row) => ({
       type: row.event_type as StrokeEvent['type'],
@@ -193,14 +197,9 @@ app.get('/events', async (req, res) => {
       timestamp: parseInt(row.timestamp),
     }));
 
-    let roomName = `Room ${roomId}`;
-    const nameRow = await pool.query(
-      'SELECT name FROM rooms WHERE room_id = $1',
-      [roomId]
-    );
-    if (nameRow.rows.length > 0) {
-      roomName = nameRow.rows[0].name;
-    }
+    const roomName = nameRow.rows.length > 0
+      ? (nameRow.rows[0] as { name: string }).name
+      : `Room ${roomId}`;
 
     res.json({ events, roomId, roomName });
   } catch (error) {

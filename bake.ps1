@@ -3,6 +3,7 @@ $startTime = Get-Date
 # --host "tcp://192.168.88.13:32375" `
 
 docker `
+  --host "tcp://192.168.88.13:32375" `
   buildx bake `
   --allow security.insecure `
   --file docker-bake.hcl `
