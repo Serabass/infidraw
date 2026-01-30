@@ -1,10 +1,11 @@
+import type { Generated } from 'kysely';
 import { Kysely, PostgresDialect } from 'kysely';
 import { Pool } from 'pg';
 
 /** DB schema for Kysely type-safe query builder */
 export interface Database {
   stroke_events: {
-    id: bigint;
+    id: Generated<bigint>;
     event_type: string;
     stroke_id: string;
     stroke_data: unknown;
@@ -21,7 +22,7 @@ export interface Database {
     updated_at: number;
   };
   tile_events: {
-    id: bigint;
+    id: Generated<bigint>;
     room_id: string;
     tile_id: number;
     stroke_id: string;

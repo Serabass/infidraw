@@ -12,8 +12,8 @@ $env:DOCKER_BUILDKIT = "1"
 docker build -f $dockerfile -t tile-service-base:latest $serviceDir
 
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "Failed to build base image!" -ForegroundColor Red
-    exit $LASTEXITCODE
+  Write-Host "Failed to build base image!" -ForegroundColor Red
+  exit $LASTEXITCODE
 }
 
 Write-Host "Base image built successfully!" -ForegroundColor Green

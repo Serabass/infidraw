@@ -5,7 +5,7 @@ Write-Host "Building Docker images with docker buildx bake..." -ForegroundColor 
 
 $tag = $args[0]
 if (-not $tag) {
-    $tag = "latest"
+  $tag = "latest"
 }
 
 Write-Host "Using tag: $tag" -ForegroundColor Yellow
@@ -16,16 +16,16 @@ Write-Host "Registry: reg.serabass.kz" -ForegroundColor Yellow
 $targets = @("event-store", "api-gateway", "realtime-service", "tile-service", "metrics-service", "admin-service", "frontend-v2")
 $setArgs = @()
 foreach ($target in $targets) {
-    $setArgs += "--set"
-    $setArgs += "$target.tags=reg.serabass.kz/infidraw/$target`:$tag"
+  $setArgs += "--set"
+  $setArgs += "$target.tags=reg.serabass.kz/infidraw/$target`:$tag"
 }
 
 # Build and push all images
 docker buildx bake --push @setArgs
 
 if ($LASTEXITCODE -eq 0) {
-    Write-Host "Build completed successfully!" -ForegroundColor Green
+  Write-Host "Build completed successfully!" -ForegroundColor Green
 } else {
-    Write-Host "Build failed!" -ForegroundColor Red
-    exit $LASTEXITCODE
+  Write-Host "Build failed!" -ForegroundColor Red
+  exit $LASTEXITCODE
 }
