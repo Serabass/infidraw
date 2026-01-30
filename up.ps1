@@ -3,7 +3,7 @@ $ErrorActionPreference = "Stop"
 
 Write-Host "Starting services..." -ForegroundColor Cyan
 
-docker-compose up -d
+docker-compose up --build -d
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Failed to start services!" -ForegroundColor Red
