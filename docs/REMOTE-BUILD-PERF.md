@@ -92,3 +92,31 @@ Bake по умолчанию гоняет несколько таргетов п
 
 - Достаточно RAM для BuildKit (иначе своп и тормоза).
 - CPU: сборка Node/Angular любит ядра; при нехватке шаги типа `npm run build` будут долгими.
+
+---
+
+## Ошибка TLS при cache-from / cache-to (registry)
+
+Если при bake появляется:
+
+```text
+failed to configure registry cache importer: ... Head "https://reg.serabass.kz/...": tls: failed to verify certificate: x509: certificate signed by unknown authority
+```
+
+значит BuildKit (в buildx builder) не доверяет сертификату реестра `reg.serabass.kz` (самоподписанный или частный CA). У buildx с драйвером `docker-container` настройки реестра берутся из **конфига BuildKit**, а не из `daemon.json`.
+
+**Что сделано в репозитории:** в корне лежит `buildkitd.toml` с `[registry."reg.serabass.kz"] insecure = true`. Скрипт `bake.ps1` при создании builder'а передаёт этот конфиг в `docker buildx create --buildkitd-config buildkitd.toml`. Если builder уже был создан **без** этого конфига (или ошибка TLS остаётся), пересоздай builder **одним** из способов:
+
+```powershell
+# Вариант 1: флаг (рекомендуется)
+.\bake.ps1 -RecreateBuilder
+
+# Вариант 2: вручную
+$env:DOCKER_HOST = "tcp://192.168.88.13:32375"
+docker buildx rm infidraw-remote
+.\bake.ps1
+```
+
+При следующем запуске bake builder создастся заново с конфигом из `buildkitd.toml`, и cache-from/cache-to в `reg.serabass.kz` будут без проверки TLS.
+
+**Альтернатива (без buildkitd.toml):** на удалённом хосте (192.168.88.13) в `/etc/docker/daemon.json` добавить `"insecure-registries": ["reg.serabass.kz"]` и перезапустить Docker. Для классического `docker pull` этого достаточно; для buildx с docker-container драйвером конфиг BuildKit (как выше) надёжнее.

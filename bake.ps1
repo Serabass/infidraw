@@ -3,7 +3,8 @@ param(
   [switch]$NoCache,
   [switch]$FrontendOnly,
   [switch]$Verbose,
-  [switch]$ChangedOnly
+  [switch]$ChangedOnly,
+  [switch]$RecreateBuilder
 )
 
 $ErrorActionPreference = "Stop"
@@ -13,12 +14,21 @@ $savedDockerHost = $env:DOCKER_HOST
 $env:DOCKER_HOST = "tcp://192.168.88.13:32375"
 $builderName = "infidraw-remote"
 
+# Run from repo root so buildkitd.toml and docker-bake.hcl paths resolve correctly
+Push-Location $PSScriptRoot
 try {
   # docker driver does not support cache export (type=registry). Use docker-container driver.
-  docker buildx use $builderName 2>$null
-  if ($LASTEXITCODE -ne 0) {
-    docker buildx create --name $builderName --driver docker-container --use
-  }
+  # Registry insecure (reg.serabass.kz) is in buildkitd.toml; passed on builder create.
+  # if ($RecreateBuilder) {
+  #   try { docker buildx rm $builderName 2>$null } catch { }
+  #   if ($Verbose) { Write-Output "Builder $builderName removed or was missing (RecreateBuilder). Will create with buildkitd.toml." }
+  # }
+  # try { docker buildx use $builderName 2>$null } catch { }
+  # if ($LASTEXITCODE -ne 0) {
+  #   if (-not (Test-Path "buildkitd.toml")) { throw "buildkitd.toml not found in $PSScriptRoot" }
+  #   docker buildx create --name $builderName --driver docker-container --buildkitd-config (Resolve-Path "buildkitd.toml").Path --use
+  #   if ($Verbose) { Write-Output "Builder $builderName created with buildkitd.toml (insecure registry)." }
+  # }
 
   $startTime = Get-Date
 
@@ -89,5 +99,6 @@ try {
   kubectl rollout status -n infidraw $deployList --timeout=120s
 }
 finally {
+  Pop-Location
   $env:DOCKER_HOST = $savedDockerHost
 }

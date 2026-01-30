@@ -1,0 +1,6 @@
+# BuildKit config for docker-container driver.
+# Insecure registry: skip TLS verify for reg.serabass.kz (self-signed or private CA).
+# Required for cache-from/cache-to and push when building on remote dind.
+
+[registry."reg.serabass.kz"]
+  insecure = true
