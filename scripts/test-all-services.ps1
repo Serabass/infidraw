@@ -4,7 +4,7 @@ $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $services = @('admin-service', 'api-gateway', 'event-store', 'metrics-service', 'realtime-service', 'tile-service')
 $failed = @()
 foreach ($name in $services) {
-  $dir = Join-Path $root "services" $name
+  $dir = Join-Path (Join-Path $root "services") $name
   if (-not (Test-Path $dir)) { continue }
   Write-Host "Testing $name..." -ForegroundColor Cyan
   Push-Location $dir

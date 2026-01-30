@@ -1,13 +1,21 @@
+param(
+  [switch]$NoCache,
+  [switch]$FrontendOnly
+)
+
 $startTime = Get-Date
 
-# --host "tcp://192.168.88.13:32375" `
+$bakeArgs = @(
+  "buildx", "bake",
+  "--allow", "security.insecure",
+  "--file", "docker-bake.hcl",
+  "--load",
+  "--push"
+)
+if ($NoCache) { $bakeArgs += "--no-cache" }
+if ($FrontendOnly) { $bakeArgs += "frontend-v2" }
 
-docker `
-  buildx bake `
-  --allow security.insecure `
-  --file docker-bake.hcl `
-  --load `
-  --push 1> bake.log 2>&1
+docker @bakeArgs 1> bake.log 2>&1
 
 $endTime = Get-Date
 $executionTime = $endTime - $startTime
@@ -16,8 +24,9 @@ Write-Output ("Elapsed: {0:hh\:mm\:ss\.fff}" -f [TimeSpan]::FromSeconds($executi
 
 $deployments = @(
   "event-store", "api-gateway", "realtime-service", "tile-service",
-  "metrics-service", "admin-service", "frontend-v2"
+  "metrics-service", "admin-service", "frontend-v2", "snapshot-worker"
 )
+if ($FrontendOnly) { $deployments = @("frontend-v2") }
 
 $deployList = $deployments | ForEach-Object { "deployment/$_" }
 kubectl rollout restart -n infidraw $deployList
