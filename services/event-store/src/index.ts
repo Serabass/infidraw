@@ -12,6 +12,29 @@ const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
 });
 
+const TILE_SIZE = parseInt(process.env.TILE_SIZE || '512');
+const TILE_ID_OFFSET = 500_000;
+
+/** Encode (tileX, tileY) as single bigint for index-friendly lookups. Supports negative coords. */
+function encodeTileId(tileX: number, tileY: number): number {
+  return (tileX + TILE_ID_OFFSET) * 1_000_000 + (tileY + TILE_ID_OFFSET);
+}
+
+/** Which tile ids does a bbox touch? */
+function getTileIdsForBbox(minX: number, minY: number, maxX: number, maxY: number): number[] {
+  const minTileX = Math.floor(minX / TILE_SIZE);
+  const minTileY = Math.floor(minY / TILE_SIZE);
+  const maxTileX = Math.floor(maxX / TILE_SIZE);
+  const maxTileY = Math.floor(maxY / TILE_SIZE);
+  const ids: number[] = [];
+  for (let tx = minTileX; tx <= maxTileX; tx++) {
+    for (let ty = minTileY; ty <= maxTileY; ty++) {
+      ids.push(encodeTileId(tx, ty));
+    }
+  }
+  return ids;
+}
+
 const redisClient = createClient({
   url: process.env.REDIS_URL,
 });
@@ -84,6 +107,23 @@ async function initDb() {
       updated_at BIGINT NOT NULL DEFAULT 0
     );
   `);
+
+  // tile_id + seq pattern: query by tile_id IN (...), delta by seq > since_seq
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS tile_events (
+      id BIGSERIAL PRIMARY KEY,
+      room_id VARCHAR(64) NOT NULL,
+      tile_id BIGINT NOT NULL,
+      stroke_id VARCHAR(36) NOT NULL,
+      event_type VARCHAR(50) NOT NULL,
+      payload JSONB,
+      ts BIGINT NOT NULL
+    );
+  `);
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_tile_events_room_tile_id
+      ON tile_events (room_id, tile_id, id);
+  `);
 }
 
 async function initRedis() {
@@ -130,6 +170,17 @@ app.post('/strokes', async (req, res) => {
       'INSERT INTO stroke_events (event_type, stroke_id, stroke_data, timestamp, min_x, min_y, max_x, max_y, room_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)',
       [event.type, event.strokeId, JSON.stringify(stroke), event.timestamp, minX, minY, maxX, maxY, roomId]
     );
+
+    const tileIds = getTileIdsForBbox(minX, minY, maxX, maxY);
+    if (tileIds.length > 0) {
+      const payload = JSON.stringify(stroke);
+      const values = tileIds.map((_, i) => `($${i * 6 + 1}, $${i * 6 + 2}, $${i * 6 + 3}, $${i * 6 + 4}, $${i * 6 + 5}, $${i * 6 + 6})`).join(', ');
+      const params = tileIds.flatMap((tileId) => [roomId, tileId, event.strokeId, event.type, payload, event.timestamp]);
+      await pool.query(
+        `INSERT INTO tile_events (room_id, tile_id, stroke_id, event_type, payload, ts) VALUES ${values}`,
+        params
+      );
+    }
 
     const eventJson = JSON.stringify({ ...event, roomId });
     await redisClient.publish('stroke_events', eventJson);
@@ -233,6 +284,25 @@ app.post('/strokes/:id/erase', async (req, res) => {
       'INSERT INTO stroke_events (event_type, stroke_id, stroke_data, timestamp, room_id) VALUES ($1, $2, $3, $4, $5)',
       [event.type, strokeId, strokeData, timestamp, roomId]
     );
+
+    const bboxRow = await pool.query(
+      `SELECT min_x, min_y, max_x, max_y FROM stroke_events 
+       WHERE stroke_id = $1 AND event_type = 'stroke_created' AND room_id = $2 AND min_x IS NOT NULL LIMIT 1`,
+      [strokeId, roomId]
+    );
+    if (bboxRow.rows.length > 0) {
+      const { min_x, min_y, max_x, max_y } = bboxRow.rows[0];
+      const tileIds = getTileIdsForBbox(min_x, min_y, max_x, max_y);
+      const payload = JSON.stringify({ hiddenPointIndices: body.hiddenPointIndices });
+      if (tileIds.length > 0) {
+        const values = tileIds.map((_, i) => `($${i * 6 + 1}, $${i * 6 + 2}, $${i * 6 + 3}, $${i * 6 + 4}, $${i * 6 + 5}, $${i * 6 + 6})`).join(', ');
+        const params = tileIds.flatMap((tileId) => [roomId, tileId, strokeId, 'stroke_erased', payload, timestamp]);
+        await pool.query(
+          `INSERT INTO tile_events (room_id, tile_id, stroke_id, event_type, payload, ts) VALUES ${values}`,
+          params
+        );
+      }
+    }
 
     const eventJson = JSON.stringify({ ...event, hiddenPointIndices: body.hiddenPointIndices, roomId });
     await redisClient.publish('stroke_events', eventJson);

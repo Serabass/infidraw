@@ -9,6 +9,11 @@ const app = express();
 app.use(express.json({ limit: '10mb' }));
 
 const TILE_SIZE = parseInt(process.env.TILE_SIZE || '512');
+const TILE_ID_OFFSET = 500_000;
+
+function encodeTileId(tileX: number, tileY: number): number {
+  return (tileX + TILE_ID_OFFSET) * 1_000_000 + (tileY + TILE_ID_OFFSET);
+}
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -103,10 +108,56 @@ async function initRedis() {
   await redisClient.connect();
 }
 
-async function getStrokesForTile(tileX: number, tileY: number, roomId: string, sinceVersion?: number): Promise<Stroke[]> {
-  const bbox = getTileBbox(tileX, tileY);
-  const rid = roomId || DEFAULT_ROOM;
+/** Build strokes from tile_events (stroke_created + stroke_erased). Returns map stroke_id -> { stroke, lastTs }. */
+function applyTileEvents(rows: { event_type: string; stroke_id: string; payload: unknown; ts: number }[]): { strokes: Stroke[]; lastTsByStroke: Map<string, number> } {
+  const strokesById = new Map<string, Stroke>();
+  const lastTsByStroke = new Map<string, number>();
+  for (const row of rows) {
+    const ts = Number(row.ts);
+    lastTsByStroke.set(row.stroke_id, ts);
+    if (row.event_type === 'stroke_created') {
+      const stroke = row.payload as Stroke;
+      if (!stroke.hidden) strokesById.set(row.stroke_id, { ...stroke });
+    } else if (row.event_type === 'stroke_erased') {
+      const stroke = strokesById.get(row.stroke_id);
+      if (stroke && (row.payload as { hiddenPointIndices?: number[] }).hiddenPointIndices) {
+        const indices = new Set((row.payload as { hiddenPointIndices: number[] }).hiddenPointIndices);
+        stroke.points = stroke.points.filter((_, i) => !indices.has(i));
+        if (stroke.points.length === 0) strokesById.delete(row.stroke_id);
+      }
+    }
+  }
+  return { strokes: Array.from(strokesById.values()), lastTsByStroke };
+}
 
+async function getStrokesForTile(tileX: number, tileY: number, roomId: string, sinceVersion?: number): Promise<Stroke[]> {
+  const rid = roomId || DEFAULT_ROOM;
+  const tileId = encodeTileId(tileX, tileY);
+  const startTime = Date.now();
+
+  const tileEventsQuery = `
+    SELECT id, event_type, stroke_id, payload, ts
+    FROM tile_events
+    WHERE room_id = $1 AND tile_id = $2
+    ORDER BY id ASC
+    LIMIT 50000
+  `;
+  const tileResult = await pool.query(tileEventsQuery, [rid, tileId]);
+
+  if (tileResult.rows.length > 0) {
+    const { strokes, lastTsByStroke } = applyTileEvents(tileResult.rows);
+    const bbox = getTileBbox(tileX, tileY);
+    let filtered = strokes.filter((s) =>
+      s.points.some(([x, y]) => x >= bbox.x1 && x < bbox.x2 && y >= bbox.y1 && y < bbox.y2)
+    );
+    if (sinceVersion != null) {
+      filtered = filtered.filter((s) => (lastTsByStroke.get(s.id) ?? 0) > sinceVersion);
+    }
+    console.log(`[TileService] Tile [${tileX},${tileY}] (tile_id): ${filtered.length} strokes from ${tileResult.rows.length} events (${Date.now() - startTime}ms)`);
+    return filtered;
+  }
+
+  const bbox = getTileBbox(tileX, tileY);
   const query = `
     SELECT stroke_data, timestamp
     FROM stroke_events 
@@ -121,29 +172,65 @@ async function getStrokesForTile(tileX: number, tileY: number, roomId: string, s
     ORDER BY timestamp DESC
     LIMIT 10000
   `;
-
-  const startTime = Date.now();
-  const params = sinceVersion
-    ? [rid, bbox.x1, bbox.x2, bbox.y1, bbox.y2, sinceVersion]
-    : [rid, bbox.x1, bbox.x2, bbox.y1, bbox.y2];
+  const params = sinceVersion ? [rid, bbox.x1, bbox.x2, bbox.y1, bbox.y2, sinceVersion] : [rid, bbox.x1, bbox.x2, bbox.y1, bbox.y2];
   const result = await pool.query(query, params);
-  const queryTime = Date.now() - startTime;
-
-  // Теперь фильтруем только по точкам (bbox может быть больше чем реальные точки)
-  // Но это уже намного меньше данных чем было раньше
-  const filterStartTime = Date.now();
   const strokes = result.rows
     .map((row) => row.stroke_data as Stroke)
-    .filter((stroke) => {
-      // Проверяем, есть ли хотя бы одна точка stroke в пределах тайла
-      return stroke.points.some(
-        ([x, y]) => x >= bbox.x1 && x < bbox.x2 && y >= bbox.y1 && y < bbox.y2
-      );
-    });
-  const filterTime = Date.now() - filterStartTime;
-
-  console.log(`[TileService] Tile [${tileX},${tileY}]: found ${strokes.length} strokes from ${result.rows.length} candidates (query: ${queryTime}ms, filter: ${filterTime}ms, bbox: ${bbox.x1},${bbox.y1} - ${bbox.x2},${bbox.y2})`);
+    .filter((s) => s.points.some(([x, y]) => x >= bbox.x1 && x < bbox.x2 && y >= bbox.y1 && y < bbox.y2));
+  console.log(`[TileService] Tile [${tileX},${tileY}] (bbox fallback): ${strokes.length} strokes (${Date.now() - startTime}ms)`);
   return strokes;
+}
+
+type TileEventRow = { event_type: string; stroke_id: string; payload: unknown; ts: number };
+
+/** One query for many tiles: tile_id IN (...). Returns map tile_id -> rows (for delta/snapshot). */
+async function getTileEventsBatch(roomId: string, tileIds: number[]): Promise<Map<number, TileEventRow[]>> {
+  if (tileIds.length === 0) return new Map();
+  const result = await pool.query(
+    `SELECT tile_id, event_type, stroke_id, payload, ts
+     FROM tile_events
+     WHERE room_id = $1 AND tile_id = ANY($2::bigint[])
+     ORDER BY tile_id, id ASC
+     LIMIT 500000`,
+    [roomId || DEFAULT_ROOM, tileIds]
+  );
+  const byTile = new Map<number, TileEventRow[]>();
+  for (const row of result.rows) {
+    const tileId = Number(row.tile_id);
+    if (!byTile.has(tileId)) byTile.set(tileId, []);
+    byTile.get(tileId)!.push({
+      event_type: row.event_type,
+      stroke_id: row.stroke_id,
+      payload: row.payload,
+      ts: row.ts,
+    });
+  }
+  return byTile;
+}
+
+/** Same as getStrokesForTile but uses pre-fetched rows when provided (avoids N queries). */
+async function getStrokesForTileWithEvents(
+  tileX: number,
+  tileY: number,
+  roomId: string,
+  sinceVersion: number | undefined,
+  preFetchedRows: TileEventRow[] | undefined
+): Promise<Stroke[]> {
+  const rid = roomId || DEFAULT_ROOM;
+  const tileId = encodeTileId(tileX, tileY);
+  const bbox = getTileBbox(tileX, tileY);
+
+  if (preFetchedRows && preFetchedRows.length > 0) {
+    const { strokes, lastTsByStroke } = applyTileEvents(preFetchedRows);
+    let filtered = strokes.filter((s) =>
+      s.points.some(([x, y]) => x >= bbox.x1 && x < bbox.x2 && y >= bbox.y1 && y < bbox.y2)
+    );
+    if (sinceVersion != null) {
+      filtered = filtered.filter((s) => (lastTsByStroke.get(s.id) ?? 0) > sinceVersion);
+    }
+    return filtered;
+  }
+  return getStrokesForTile(tileX, tileY, roomId, sinceVersion);
 }
 
 function getBrushStyle(tool: string): { opacity: number; lineCap: CanvasLineCap; lineJoin: CanvasLineJoin; dash: number[] } {
@@ -268,7 +355,10 @@ app.get('/tiles', async (req, res) => {
       }
     }
 
-    // Обрабатываем тайлы параллельно
+    const tileIds = tileCoords.map(([tx, ty]) => encodeTileId(tx, ty));
+    const eventsByTileId = await getTileEventsBatch(roomId, tileIds);
+
+    // Обрабатываем тайлы (данные уже из одного запроса по tile_id IN (...))
     const tilePromises = tileCoords.map(async ([tileX, tileY]) => {
       const latestSnapshot = await pool.query(
         `SELECT snapshot_url, version FROM tile_snapshots 
@@ -285,7 +375,13 @@ app.get('/tiles', async (req, res) => {
         snapshotUrl = latestSnapshot.rows[0].snapshot_url;
         version = parseInt(latestSnapshot.rows[0].version);
       } else {
-        strokes = await getStrokesForTile(tileX, tileY, roomId, sinceVersion);
+        strokes = await getStrokesForTileWithEvents(
+          tileX,
+          tileY,
+          roomId,
+          sinceVersion,
+          eventsByTileId.get(encodeTileId(tileX, tileY))
+        );
 
         version = latestSnapshot.rows.length > 0
           ? parseInt(latestSnapshot.rows[0].version)
