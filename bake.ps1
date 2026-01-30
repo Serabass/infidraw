@@ -11,7 +11,7 @@ $ErrorActionPreference = "Stop"
 
 # Remote Docker daemon (build on 192.168.88.13)
 $savedDockerHost = $env:DOCKER_HOST
-$env:DOCKER_HOST = "tcp://192.168.88.13:32375"
+$env:DOCKER_HOST = $savedDockerHost # "tcp://192.168.88.13:32375"
 $builderName = "infidraw-remote"
 
 # Run from repo root so buildkitd.toml and docker-bake.hcl paths resolve correctly
@@ -96,7 +96,7 @@ try {
 
   $deployList = $deployments | ForEach-Object { "deployment/$_" }
   kubectl rollout restart -n infidraw $deployList
-  kubectl rollout status -n infidraw $deployList --timeout=120s
+  # kubectl rollout status -n infidraw $deployList --timeout=120s
 }
 finally {
   Pop-Location
