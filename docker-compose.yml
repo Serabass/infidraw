@@ -39,10 +39,11 @@ services:
     volumes:
       - minio_data:/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 30s
-      timeout: 20s
-      retries: 3
+      # minio image has no curl/wget; use mc (minio client)
+      test: ["CMD-SHELL", "mc alias set local http://localhost:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD} 2>/dev/null; mc ready local"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
 
   nginx:
     image: nginx:alpine

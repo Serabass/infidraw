@@ -69,14 +69,12 @@ async function initRedis() {
       }
       console.log(`[Redis] Received stroke event: ${event.type}, strokeId: ${event.strokeId}`);
 
-      const messageRoomId = (event as any).roomId || '1';
+      const messageRoomId = String((event as any).roomId ?? '1');
       if (event.type === 'stroke_created' && event.stroke) {
-        const tiles = getTilesForStroke(event.stroke);
         let notifiedCount = 0;
         for (const [ws, client] of clients.entries()) {
-          const sameRoom = (client.roomId || '1') === messageRoomId;
-          const shouldNotify = sameRoom && (client.subscribedTiles.size === 0 || tiles.some((tile) => client.subscribedTiles.has(tile)));
-          if (shouldNotify && ws.readyState === WebSocket.OPEN) {
+          const clientRoom = String(client.roomId ?? '1');
+          if (clientRoom === messageRoomId && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify(event));
             notifiedCount++;
           }
@@ -85,7 +83,7 @@ async function initRedis() {
       } else if (event.type === 'stroke_erased') {
         let notifiedCount = 0;
         for (const [ws, client] of clients.entries()) {
-          if ((client.roomId || '1') === messageRoomId && ws.readyState === WebSocket.OPEN) {
+          if (String(client.roomId ?? '1') === messageRoomId && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify(event));
             notifiedCount++;
           }
@@ -101,10 +99,10 @@ async function initRedis() {
     try {
       const data = JSON.parse(message);
       if (data.type === 'room_renamed' && data.roomId && typeof data.name === 'string') {
-        const messageRoomId = data.roomId;
+        const messageRoomId = String(data.roomId);
         let notifiedCount = 0;
         for (const [ws, client] of clients.entries()) {
-          if ((client.roomId || '1') === messageRoomId && ws.readyState === WebSocket.OPEN) {
+          if (String(client.roomId ?? '1') === messageRoomId && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify(data));
             notifiedCount++;
           }
@@ -119,11 +117,11 @@ async function initRedis() {
   await subscriber.subscribe('talker_events', (message, channel) => {
     try {
       const data = JSON.parse(message);
-      const messageRoomId = (data.roomId as string) || '1';
+      const messageRoomId = String(data.roomId ?? '1');
       if ((data.type === 'talker_created' && data.talker) || (data.type === 'talker_message' && data.message)) {
         let notifiedCount = 0;
         for (const [ws, client] of clients.entries()) {
-          if ((client.roomId || '1') === messageRoomId && ws.readyState === WebSocket.OPEN) {
+          if (String(client.roomId ?? '1') === messageRoomId && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify(data));
             notifiedCount++;
           }
@@ -184,6 +182,17 @@ wss.on('connection', (ws: WebSocket, req: { url?: string }) => {
           });
           console.log(`[WS] Client unsubscribed from ${tiles.length} tiles`);
         }
+      } else if (message.type === 'stroke_created' && message.stroke && typeof message.roomId === 'string') {
+        const roomId = String(message.roomId);
+        const payload = JSON.stringify({ type: 'stroke_created', stroke: message.stroke, roomId });
+        let count = 0;
+        for (const [sock, c] of clients.entries()) {
+          if (String(c.roomId ?? '1') === roomId && sock.readyState === WebSocket.OPEN) {
+            sock.send(payload);
+            count++;
+          }
+        }
+        console.log(`[WS] Broadcast stroke_created ${message.stroke?.id ?? '?'} to ${count} clients (room=${roomId})`);
       }
     } catch (error) {
       console.error('Error processing WebSocket message:', error);
