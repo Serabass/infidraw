@@ -13,7 +13,7 @@ FROM apk-deps AS npm-deps
 WORKDIR /app
 COPY package*.json ./
 RUN --mount=type=cache,target=/root/.npm \
-    npm ci
+    npm ci --loglevel=error
 
 ##################################################################################
 

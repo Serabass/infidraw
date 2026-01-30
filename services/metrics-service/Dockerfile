@@ -3,7 +3,7 @@ FROM node:20-alpine AS deps
 WORKDIR /app
 COPY package*.json ./
 RUN --mount=type=cache,target=/root/.npm \
-  npm ci
+  npm ci --loglevel=error
 
 ##################################################################################
 
