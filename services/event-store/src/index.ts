@@ -237,7 +237,7 @@ app.post('/strokes', async (req, res) => {
         .execute();
     }
 
-    await redisClient.del(EVENTS_FULL_CACHE_PREFIX + roomId).catch(() => {});
+    await redisClient.del(EVENTS_FULL_CACHE_PREFIX + roomId).catch(() => { });
 
     const eventPayload = { ...event, roomId };
     const eventBytes = Buffer.from(msgpackEncode(eventPayload));
@@ -355,7 +355,7 @@ app.get('/events', async (req, res) => {
     const events: StrokeEvent[] = eventsRows.map((row: EventsRow) => ({
       type: row.event_type as StrokeEvent['type'],
       strokeId: row.stroke_id,
-      stroke: row.stroke_data as Stroke | undefined,
+      stroke: row.stroke_data,
       timestamp: Number(row.timestamp),
     }));
 
@@ -364,7 +364,7 @@ app.get('/events', async (req, res) => {
     const payload = { events, roomId, roomName };
     if (since === 0) {
       const cacheKey = EVENTS_FULL_CACHE_PREFIX + roomId;
-      await redisClient.setEx(cacheKey, EVENTS_FULL_CACHE_TTL_SEC, JSON.stringify(payload)).catch(() => {});
+      await redisClient.setEx(cacheKey, EVENTS_FULL_CACHE_TTL_SEC, JSON.stringify(payload)).catch(() => { });
     }
 
     const totalMs = Date.now() - totalStart;
@@ -439,7 +439,7 @@ app.post('/strokes/:id/erase', async (req, res) => {
       }
     }
 
-    await redisClient.del(EVENTS_FULL_CACHE_PREFIX + roomId).catch(() => {});
+    await redisClient.del(EVENTS_FULL_CACHE_PREFIX + roomId).catch(() => { });
 
     const eventPayload = { ...event, hiddenPointIndices: body.hiddenPointIndices, roomId };
     const eventBytes = Buffer.from(msgpackEncode(eventPayload));
@@ -509,7 +509,9 @@ app.get('/rooms/:roomId/rename', async (req, res) => {
     await db
       .insertInto('rooms')
       .values({ room_id: roomId, name, updated_at: updatedAt })
-      .onConflict((oc) => oc.column('room_id').doUpdateSet({ name, updated_at: updatedAt }))
+      .onConflict((oc: { column: (c: 'room_id') => { doUpdateSet: (s: object) => unknown } }) =>
+        oc.column('room_id').doUpdateSet({ name, updated_at: updatedAt })
+      )
       .execute();
     const eventJson = JSON.stringify({ type: 'room_renamed', roomId, name, updatedAt });
     await redisClient.publish('room_events', eventJson);
@@ -549,7 +551,9 @@ async function handleSetRoomName(req: express.Request, res: express.Response): P
     await db
       .insertInto('rooms')
       .values({ room_id: roomId, name, updated_at: updatedAt })
-      .onConflict((oc) => oc.column('room_id').doUpdateSet({ name, updated_at: updatedAt }))
+      .onConflict((oc: { column: (c: 'room_id') => { doUpdateSet: (s: object) => unknown } }) =>
+        oc.column('room_id').doUpdateSet({ name, updated_at: updatedAt })
+      )
       .execute();
     const eventJson = JSON.stringify({ type: 'room_renamed', roomId, name, updatedAt });
     await redisClient.publish('room_events', eventJson);
