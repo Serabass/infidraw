@@ -46,6 +46,7 @@ $routes = @(
     @{ Name = 'GET /api/rooms'; Uri = "$api/rooms"; Query = @{} },
     @{ Name = "GET /api/rooms/$RoomId"; Uri = "$api/rooms/$RoomId"; Query = @{} },
     @{ Name = "GET /api/events (room=$RoomId, full)"; Uri = "$api/events"; Query = @{ roomId = $RoomId } },
+    @{ Name = "GET /api/events (room=$RoomId, limit=500)"; Uri = "$api/events"; Query = @{ roomId = $RoomId; limit = '500' } },
     @{ Name = "GET /api/events (room=$RoomId, limit=100)"; Uri = "$api/events"; Query = @{ roomId = $RoomId; limit = '100' } },
     @{ Name = "GET /api/tiles (room=$RoomId, view -10..10)"; Uri = "$api/tiles"; Query = @{ roomId = $RoomId; x1 = '-10'; y1 = '-10'; x2 = '10'; y2 = '10' } },
     @{ Name = "GET /api/tiles (room=$RoomId, view -5..5)"; Uri = "$api/tiles"; Query = @{ roomId = $RoomId; x1 = '-5'; y1 = '-5'; x2 = '5'; y2 = '5' } },

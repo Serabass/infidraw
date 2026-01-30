@@ -262,9 +262,25 @@ app.get('/strokes/:id', async (req, res) => {
   }
 });
 
+/** Send events payload as JSON or MessagePack depending on Accept */
+function sendEventsPayload(
+  res: express.Response,
+  payload: { events: StrokeEvent[]; roomId: string; roomName: string },
+  acceptHeader: string | undefined
+): void {
+  const useMsgpack = acceptHeader != null && acceptHeader.includes('application/msgpack');
+  if (useMsgpack) {
+    res.setHeader('Content-Type', 'application/msgpack');
+    res.send(Buffer.from(msgpackEncode(payload)));
+  } else {
+    res.json(payload);
+  }
+}
+
 // GET /events - получить события и название комнаты (roomName по тому же маршруту, что и /api/events)
 app.get('/events', async (req, res) => {
   const totalStart = Date.now();
+  const acceptHeader = req.get('Accept');
   try {
     const roomId = (req.query.roomId as string) || DEFAULT_ROOM;
     const since = parseInt(req.query.since as string) || 0;
@@ -281,7 +297,7 @@ app.get('/events', async (req, res) => {
         if (cached) {
           const payload = JSON.parse(cached) as { events: StrokeEvent[]; roomId: string; roomName: string };
           console.log(`[EventStore] GET /events room=${roomId} cache HIT, ${payload.events.length} events, ${Date.now() - totalStart}ms`);
-          return res.json(payload);
+          return sendEventsPayload(res, payload, acceptHeader);
         }
       } catch (e) {
         // cache miss or parse error — fall through to DB
@@ -322,7 +338,7 @@ app.get('/events', async (req, res) => {
     const totalMs = Date.now() - totalStart;
     console.log(`[EventStore] GET /events room=${roomId} since=${since} rows=${events.length} db=${queryMs}ms total=${totalMs}ms`);
 
-    res.json(payload);
+    sendEventsPayload(res, payload, acceptHeader);
   } catch (error) {
     console.error('Error fetching events:', error);
     res.status(500).json({ error: 'Internal server error' });

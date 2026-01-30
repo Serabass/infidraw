@@ -89,3 +89,14 @@
 | ETag / 304 для since=0 | Средняя | Нулевой трафик при повторном заходе без изменений |
 
 Оптимальный быстрый набор: **меньший чанк (или tiles-first) + MessagePack для GET /events** — уже сильно снизят и размер ответа, и время до первого отображения.
+
+---
+
+## Внесённые изменения (реализовано)
+
+- **event-store:** GET `/events` при `Accept: application/msgpack` отдаёт msgpack вместо JSON; добавлена `sendEventsPayload(res, payload, acceptHeader)`.
+- **frontend-v2:** пагинация по 500 событий в `SyncService.loadExistingStrokes()` (JSON, без msgpack — из-за Node 16 и конфликтов зависимостей в Docker). Основной выигрыш — размер одного ответа, не один гигабайт.
+- **nginx:** в `gzip_types` добавлен `application/msgpack`.
+- **frontend-v2 Dockerfile:** `npm install --legacy-peer-deps` (lockfile был рассинхронизирован, peer-конфликты angular-eslint).
+
+Откат: `git checkout -- services/event-store/src/index.ts frontend-v2/src/ frontend-v2/Dockerfile nginx/nginx.conf`.
