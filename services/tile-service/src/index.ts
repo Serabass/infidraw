@@ -110,7 +110,10 @@ async function initRedis() {
 }
 
 /** Build strokes from tile_events (stroke_created + stroke_erased). Returns map stroke_id -> { stroke, lastTs }. */
-function applyTileEvents(rows: { event_type: string; stroke_id: string; payload: unknown; ts: number }[]): { strokes: Stroke[]; lastTsByStroke: Map<string, number> } {
+function applyTileEvents(rows: { event_type: string; stroke_id: string; payload: unknown; ts: number }[]): {
+  strokes: Stroke[];
+  lastTsByStroke: Map<string, number>;
+} {
   const strokesById = new Map<string, Stroke>();
   const lastTsByStroke = new Map<string, number>();
   for (const row of rows) {
@@ -131,7 +134,12 @@ function applyTileEvents(rows: { event_type: string; stroke_id: string; payload:
   return { strokes: Array.from(strokesById.values()), lastTsByStroke };
 }
 
-async function getStrokesForTile(tileX: number, tileY: number, roomId: string, sinceVersion?: number): Promise<Stroke[]> {
+async function getStrokesForTile(
+  tileX: number,
+  tileY: number,
+  roomId: string,
+  sinceVersion?: number
+): Promise<Stroke[]> {
   const rid = roomId || DEFAULT_ROOM;
   const tileId = encodeTileId(tileX, tileY);
   const startTime = Date.now();
@@ -154,7 +162,9 @@ async function getStrokesForTile(tileX: number, tileY: number, roomId: string, s
     if (sinceVersion != null) {
       filtered = filtered.filter((s) => (lastTsByStroke.get(s.id) ?? 0) > sinceVersion);
     }
-    console.log(`[TileService] Tile [${tileX},${tileY}] (tile_id): ${filtered.length} strokes from ${tileResult.rows.length} events (${Date.now() - startTime}ms)`);
+    console.log(
+      `[TileService] Tile [${tileX},${tileY}] (tile_id): ${filtered.length} strokes from ${tileResult.rows.length} events (${Date.now() - startTime}ms)`
+    );
     return filtered;
   }
 
@@ -173,12 +183,16 @@ async function getStrokesForTile(tileX: number, tileY: number, roomId: string, s
     ORDER BY timestamp DESC
     LIMIT 10000
   `;
-  const params = sinceVersion ? [rid, bbox.x1, bbox.x2, bbox.y1, bbox.y2, sinceVersion] : [rid, bbox.x1, bbox.x2, bbox.y1, bbox.y2];
+  const params = sinceVersion
+    ? [rid, bbox.x1, bbox.x2, bbox.y1, bbox.y2, sinceVersion]
+    : [rid, bbox.x1, bbox.x2, bbox.y1, bbox.y2];
   const result = await pool.query(query, params);
   const strokes = result.rows
     .map((row) => row.stroke_data as Stroke)
     .filter((s) => s.points.some(([x, y]) => x >= bbox.x1 && x < bbox.x2 && y >= bbox.y1 && y < bbox.y2));
-  console.log(`[TileService] Tile [${tileX},${tileY}] (bbox fallback): ${strokes.length} strokes (${Date.now() - startTime}ms)`);
+  console.log(
+    `[TileService] Tile [${tileX},${tileY}] (bbox fallback): ${strokes.length} strokes (${Date.now() - startTime}ms)`
+  );
   return strokes;
 }
 
@@ -234,7 +248,12 @@ async function getStrokesForTileWithEvents(
   return getStrokesForTile(tileX, tileY, roomId, sinceVersion);
 }
 
-function getBrushStyle(tool: string): { opacity: number; lineCap: CanvasLineCap; lineJoin: CanvasLineJoin; dash: number[] } {
+function getBrushStyle(tool: string): {
+  opacity: number;
+  lineCap: CanvasLineCap;
+  lineJoin: CanvasLineJoin;
+  dash: number[];
+} {
   switch (tool) {
     case 'pen':
       return { opacity: 1, lineCap: 'round', lineJoin: 'round', dash: [] };
@@ -378,13 +397,17 @@ app.get('/tiles', async (req, res) => {
       const maxTileRange = Math.floor(Math.sqrt(maxTiles));
       const limitedMaxTileX = Math.min(maxTileX, minTileX + maxTileRange - 1);
       const limitedMaxTileY = Math.min(maxTileY, minTileY + maxTileRange - 1);
-      console.log(`[TileService] Limited range: X[${minTileX}..${limitedMaxTileX}], Y[${minTileY}..${limitedMaxTileY}]`);
+      console.log(
+        `[TileService] Limited range: X[${minTileX}..${limitedMaxTileX}], Y[${minTileY}..${limitedMaxTileY}]`
+      );
     }
 
     // Собираем все тайлы для параллельной обработки
     const tileCoords: Array<[number, number]> = [];
-    const finalMaxTileX = tileCount > maxTiles ? Math.min(maxTileX, minTileX + Math.floor(Math.sqrt(maxTiles)) - 1) : maxTileX;
-    const finalMaxTileY = tileCount > maxTiles ? Math.min(maxTileY, minTileY + Math.floor(Math.sqrt(maxTiles)) - 1) : maxTileY;
+    const finalMaxTileX =
+      tileCount > maxTiles ? Math.min(maxTileX, minTileX + Math.floor(Math.sqrt(maxTiles)) - 1) : maxTileX;
+    const finalMaxTileY =
+      tileCount > maxTiles ? Math.min(maxTileY, minTileY + Math.floor(Math.sqrt(maxTiles)) - 1) : maxTileY;
     for (let tileX = minTileX; tileX <= finalMaxTileX; tileX++) {
       for (let tileY = minTileY; tileY <= finalMaxTileY; tileY++) {
         tileCoords.push([tileX, tileY]);
@@ -407,7 +430,10 @@ app.get('/tiles', async (req, res) => {
       let strokes: Stroke[] = [];
       let version: number;
 
-      if (latestSnapshot.rows.length > 0 && (!sinceVersion || parseInt(latestSnapshot.rows[0].version) >= sinceVersion)) {
+      if (
+        latestSnapshot.rows.length > 0 &&
+        (!sinceVersion || parseInt(latestSnapshot.rows[0].version) >= sinceVersion)
+      ) {
         snapshotUrl = latestSnapshot.rows[0].snapshot_url;
         version = parseInt(latestSnapshot.rows[0].version);
       } else {
@@ -419,9 +445,7 @@ app.get('/tiles', async (req, res) => {
           eventsByTileId.get(encodeTileId(tileX, tileY))
         );
 
-        version = latestSnapshot.rows.length > 0
-          ? parseInt(latestSnapshot.rows[0].version)
-          : Date.now();
+        version = latestSnapshot.rows.length > 0 ? parseInt(latestSnapshot.rows[0].version) : Date.now();
 
         if (strokes.length > 0) {
           const snapshotVersion = Date.now();

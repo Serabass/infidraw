@@ -55,20 +55,14 @@ describe('tile-service', () => {
 
   describe('GET /tiles', () => {
     it('returns 400 for invalid coordinates', async () => {
-      const res = await request(app)
-        .get('/tiles')
-        .query({ x1: 'x', y1: 0, x2: 512, y2: 512 });
+      const res = await request(app).get('/tiles').query({ x1: 'x', y1: 0, x2: 512, y2: 512 });
       expect(res.status).toBe(400);
       expect(res.body.error).toBe('Invalid coordinates');
     });
 
     it('returns tiles array for valid bbox (no snapshots, no strokes)', async () => {
-      mockQuery
-        .mockResolvedValueOnce({ rows: [] })
-        .mockResolvedValueOnce({ rows: [] });
-      const res = await request(app)
-        .get('/tiles')
-        .query({ roomId: '1', x1: 0, y1: 0, x2: 512, y2: 512 });
+      mockQuery.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [] });
+      const res = await request(app).get('/tiles').query({ roomId: '1', x1: 0, y1: 0, x2: 512, y2: 512 });
       expect(res.status).toBe(200);
       expect(res.body.tiles).toBeDefined();
       expect(Array.isArray(res.body.tiles)).toBe(true);
@@ -84,9 +78,7 @@ describe('tile-service', () => {
       mockQuery.mockResolvedValueOnce({
         rows: [{ snapshot_url: '/snapshots/room_1/tile_0_0_123.png', version: 123 }],
       });
-      const res = await request(app)
-        .get('/tiles')
-        .query({ roomId: '1', x1: 0, y1: 0, x2: 512, y2: 512 });
+      const res = await request(app).get('/tiles').query({ roomId: '1', x1: 0, y1: 0, x2: 512, y2: 512 });
       expect(res.status).toBe(200);
       expect(res.body.tiles[0].snapshotUrl).toBe('/snapshots/room_1/tile_0_0_123.png');
       expect(res.body.tiles[0].version).toBe(123);

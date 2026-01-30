@@ -4,9 +4,7 @@ const mockQuery = jest.fn();
 jest.mock('pg', () => ({
   Pool: jest.fn(() => ({
     query: mockQuery,
-    connect: jest.fn(() =>
-      Promise.resolve({ query: mockQuery, release: jest.fn() })
-    ),
+    connect: jest.fn(() => Promise.resolve({ query: mockQuery, release: jest.fn() })),
   })),
 }));
 
@@ -24,7 +22,10 @@ const validStroke = {
   tool: 'pen' as const,
   color: '#000000',
   width: 2,
-  points: [[0, 0], [100, 100]],
+  points: [
+    [0, 0],
+    [100, 100],
+  ],
 };
 
 describe('event-store', () => {
@@ -49,18 +50,13 @@ describe('event-store', () => {
     });
 
     it('creates stroke and returns 201', async () => {
-      mockQuery
-        .mockResolvedValueOnce({ rows: [], rowCount: 1 })
-        .mockResolvedValueOnce({ rows: [], rowCount: 1 });
+      mockQuery.mockResolvedValueOnce({ rows: [], rowCount: 1 }).mockResolvedValueOnce({ rows: [], rowCount: 1 });
       const res = await request(app).post('/strokes').send(validStroke);
       expect(res.status).toBe(201);
       expect(res.body.strokeId).toBeDefined();
       expect(res.body.stroke.tool).toBe('pen');
       expect(res.body.stroke.points).toEqual(validStroke.points);
-      expect(mockPublish).toHaveBeenCalledWith(
-        'stroke_events',
-        expect.stringContaining('stroke_created')
-      );
+      expect(mockPublish).toHaveBeenCalledWith('stroke_events', expect.stringContaining('stroke_created'));
     });
   });
 
@@ -106,9 +102,7 @@ describe('event-store', () => {
 
   describe('POST /strokes/:id/erase', () => {
     it('returns 400 for invalid body', async () => {
-      const res = await request(app)
-        .post('/strokes/s1/erase')
-        .send({});
+      const res = await request(app).post('/strokes/s1/erase').send({});
       expect(res.status).toBe(400);
     });
 
@@ -123,10 +117,7 @@ describe('event-store', () => {
       expect(res.status).toBe(201);
       expect(res.body.strokeId).toBe('s1');
       expect(res.body.hiddenPointIndices).toEqual([0, 1]);
-      expect(mockPublish).toHaveBeenCalledWith(
-        'stroke_events',
-        expect.stringContaining('stroke_erased')
-      );
+      expect(mockPublish).toHaveBeenCalledWith('stroke_events', expect.stringContaining('stroke_erased'));
     });
   });
 
@@ -181,16 +172,11 @@ describe('event-store', () => {
 
     it('updates room name and publishes event', async () => {
       mockQuery.mockResolvedValueOnce({ rows: [] });
-      const res = await request(app)
-        .get('/rooms/1/rename')
-        .query({ name: 'New Name' });
+      const res = await request(app).get('/rooms/1/rename').query({ name: 'New Name' });
       expect(res.status).toBe(200);
       expect(res.body.roomId).toBe('1');
       expect(res.body.name).toBe('New Name');
-      expect(mockPublish).toHaveBeenCalledWith(
-        'room_events',
-        expect.stringContaining('room_renamed')
-      );
+      expect(mockPublish).toHaveBeenCalledWith('room_events', expect.stringContaining('room_renamed'));
     });
   });
 
