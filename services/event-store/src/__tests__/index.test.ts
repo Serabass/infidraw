@@ -2,7 +2,12 @@ import request from 'supertest';
 
 const mockQuery = jest.fn();
 jest.mock('pg', () => ({
-  Pool: jest.fn(() => ({ query: mockQuery })),
+  Pool: jest.fn(() => ({
+    query: mockQuery,
+    connect: jest.fn(() =>
+      Promise.resolve({ query: mockQuery, release: jest.fn() })
+    ),
+  })),
 }));
 
 const mockPublish = jest.fn().mockResolvedValue(undefined);
@@ -44,7 +49,9 @@ describe('event-store', () => {
     });
 
     it('creates stroke and returns 201', async () => {
-      mockQuery.mockResolvedValueOnce({ rows: [], rowCount: 1 });
+      mockQuery
+        .mockResolvedValueOnce({ rows: [], rowCount: 1 })
+        .mockResolvedValueOnce({ rows: [], rowCount: 1 });
       const res = await request(app).post('/strokes').send(validStroke);
       expect(res.status).toBe(201);
       expect(res.body.strokeId).toBeDefined();
@@ -106,7 +113,10 @@ describe('event-store', () => {
     });
 
     it('publishes erase event and returns 201', async () => {
-      mockQuery.mockResolvedValueOnce({ rows: [], rowCount: 1 });
+      mockQuery
+        .mockResolvedValueOnce({ rows: [], rowCount: 1 })
+        .mockResolvedValueOnce({ rows: [{ min_x: 0, min_y: 0, max_x: 100, max_y: 100 }] })
+        .mockResolvedValueOnce({ rows: [], rowCount: 1 });
       const res = await request(app)
         .post('/strokes/s1/erase')
         .send({ hiddenPointIndices: [0, 1] });

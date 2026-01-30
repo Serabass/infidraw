@@ -1,18 +1,15 @@
 import express from 'express';
 import { decode as msgpackDecode, encode as msgpackEncode } from '@msgpack/msgpack';
-import { Pool } from 'pg';
 import { createClient } from 'redis';
 import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
 import type { Stroke, StrokeEvent } from './types';
+import { db, pool } from './db';
+import type { Database } from './db';
 
 const app = express();
 app.use(express.json({ limit: '10mb' }));
 app.use(express.raw({ type: 'application/msgpack', limit: '10mb' }));
-
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-});
 
 const TILE_SIZE = parseInt(process.env.TILE_SIZE || '512');
 const TILE_ID_OFFSET = 500_000;
@@ -206,20 +203,30 @@ app.post('/strokes', async (req, res) => {
       timestamp,
     };
 
-    await pool.query(
-      'INSERT INTO stroke_events (event_type, stroke_id, stroke_data, timestamp, min_x, min_y, max_x, max_y, room_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)',
-      [event.type, event.strokeId, JSON.stringify(stroke), event.timestamp, minX, minY, maxX, maxY, roomId]
-    );
+    await db.insertInto('stroke_events').values({
+      event_type: event.type,
+      stroke_id: event.strokeId,
+      stroke_data: stroke,
+      timestamp: event.timestamp,
+      min_x: minX,
+      min_y: minY,
+      max_x: maxX,
+      max_y: maxY,
+      room_id: roomId,
+    }).execute();
 
     const tileIds = getTileIdsForBbox(minX, minY, maxX, maxY);
     if (tileIds.length > 0) {
-      const payload = JSON.stringify(stroke);
-      const values = tileIds.map((_, i) => `($${i * 6 + 1}, $${i * 6 + 2}, $${i * 6 + 3}, $${i * 6 + 4}, $${i * 6 + 5}, $${i * 6 + 6})`).join(', ');
-      const params = tileIds.flatMap((tileId) => [roomId, tileId, event.strokeId, event.type, payload, event.timestamp]);
-      await pool.query(
-        `INSERT INTO tile_events (room_id, tile_id, stroke_id, event_type, payload, ts) VALUES ${values}`,
-        params
-      );
+      await db.insertInto('tile_events').values(
+        tileIds.map((tileId) => ({
+          room_id: roomId,
+          tile_id: tileId,
+          stroke_id: event.strokeId,
+          event_type: event.type,
+          payload: stroke,
+          ts: event.timestamp,
+        }))
+      ).execute();
     }
 
     await redisClient.del(EVENTS_FULL_CACHE_PREFIX + roomId).catch(() => {});
@@ -244,18 +251,21 @@ app.get('/strokes/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const roomId = (req.query.roomId as string) || DEFAULT_ROOM;
-    const result = await pool.query(
-      `SELECT stroke_data FROM stroke_events 
-       WHERE stroke_id = $1 AND event_type = 'stroke_created' AND room_id = $2
-       ORDER BY timestamp DESC LIMIT 1`,
-      [id, roomId]
-    );
+    const row = await db
+      .selectFrom('stroke_events')
+      .select('stroke_data')
+      .where('stroke_id', '=', id)
+      .where('event_type', '=', 'stroke_created')
+      .where('room_id', '=', roomId)
+      .orderBy('timestamp', 'desc')
+      .limit(1)
+      .executeTakeFirst();
 
-    if (result.rows.length === 0) {
+    if (!row) {
       return res.status(404).json({ error: 'Stroke not found' });
     }
 
-    res.json(result.rows[0].stroke_data);
+    res.json(row.stroke_data);
   } catch (error) {
     console.error('Error fetching stroke:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -316,29 +326,32 @@ app.get('/events', async (req, res) => {
     }
 
     const queryStart = Date.now();
-    const [result, nameRow] = await Promise.all([
-      pool.query(
-        `SELECT event_type, stroke_id, stroke_data, timestamp 
-         FROM stroke_events 
-         WHERE room_id = $1 AND timestamp > $2 
-         ORDER BY timestamp ASC 
-         LIMIT $3`,
-        [roomId, since, limit]
-      ),
-      pool.query('SELECT name FROM rooms WHERE room_id = $1', [roomId]),
+    const [eventsRows, nameRow] = await Promise.all([
+      db
+        .selectFrom('stroke_events')
+        .select(['event_type', 'stroke_id', 'stroke_data', 'timestamp'])
+        .where('room_id', '=', roomId)
+        .where('timestamp', '>', since)
+        .orderBy('timestamp', 'asc')
+        .limit(limit)
+        .execute(),
+      db
+        .selectFrom('rooms')
+        .select('name')
+        .where('room_id', '=', roomId)
+        .executeTakeFirst(),
     ]);
     const queryMs = Date.now() - queryStart;
 
-    const events: StrokeEvent[] = result.rows.map((row) => ({
+    type EventsRow = Pick<Database['stroke_events'], 'event_type' | 'stroke_id' | 'stroke_data' | 'timestamp'>;
+    const events: StrokeEvent[] = eventsRows.map((row: EventsRow) => ({
       type: row.event_type as StrokeEvent['type'],
       strokeId: row.stroke_id,
       stroke: row.stroke_data,
-      timestamp: parseInt(row.timestamp),
+      timestamp: Number(row.timestamp),
     }));
 
-    const roomName = nameRow.rows.length > 0
-      ? (nameRow.rows[0] as { name: string }).name
-      : `Room ${roomId}`;
+    const roomName = nameRow?.name ?? `Room ${roomId}`;
 
     const payload = { events, roomId, roomName };
     if (since === 0) {
@@ -377,27 +390,37 @@ app.post('/strokes/:id/erase', async (req, res) => {
     };
     const strokeData = JSON.stringify({ hiddenPointIndices: body.hiddenPointIndices });
 
-    await pool.query(
-      'INSERT INTO stroke_events (event_type, stroke_id, stroke_data, timestamp, room_id) VALUES ($1, $2, $3, $4, $5)',
-      [event.type, strokeId, strokeData, timestamp, roomId]
-    );
+    await db.insertInto('stroke_events').values({
+      event_type: event.type,
+      stroke_id: strokeId,
+      stroke_data: strokeData,
+      timestamp,
+      room_id: roomId,
+    }).execute();
 
-    const bboxRow = await pool.query(
-      `SELECT min_x, min_y, max_x, max_y FROM stroke_events 
-       WHERE stroke_id = $1 AND event_type = 'stroke_created' AND room_id = $2 AND min_x IS NOT NULL LIMIT 1`,
-      [strokeId, roomId]
-    );
-    if (bboxRow.rows.length > 0) {
-      const { min_x, min_y, max_x, max_y } = bboxRow.rows[0];
-      const tileIds = getTileIdsForBbox(min_x, min_y, max_x, max_y);
-      const payload = JSON.stringify({ hiddenPointIndices: body.hiddenPointIndices });
+    const bboxRow = await db
+      .selectFrom('stroke_events')
+      .select(['min_x', 'min_y', 'max_x', 'max_y'])
+      .where('stroke_id', '=', strokeId)
+      .where('event_type', '=', 'stroke_created')
+      .where('room_id', '=', roomId)
+      .where('min_x', 'is not', null)
+      .limit(1)
+      .executeTakeFirst();
+    if (bboxRow && bboxRow.min_x != null && bboxRow.min_y != null && bboxRow.max_x != null && bboxRow.max_y != null) {
+      const tileIds = getTileIdsForBbox(bboxRow.min_x, bboxRow.min_y, bboxRow.max_x, bboxRow.max_y);
+      const payload = { hiddenPointIndices: body.hiddenPointIndices };
       if (tileIds.length > 0) {
-        const values = tileIds.map((_, i) => `($${i * 6 + 1}, $${i * 6 + 2}, $${i * 6 + 3}, $${i * 6 + 4}, $${i * 6 + 5}, $${i * 6 + 6})`).join(', ');
-        const params = tileIds.flatMap((tileId) => [roomId, tileId, strokeId, 'stroke_erased', payload, timestamp]);
-        await pool.query(
-          `INSERT INTO tile_events (room_id, tile_id, stroke_id, event_type, payload, ts) VALUES ${values}`,
-          params
-        );
+        await db.insertInto('tile_events').values(
+          tileIds.map((tileId) => ({
+            room_id: roomId,
+            tile_id: tileId,
+            stroke_id: strokeId,
+            event_type: 'stroke_erased',
+            payload,
+            ts: timestamp,
+          }))
+        ).execute();
       }
     }
 
@@ -421,16 +444,18 @@ app.post('/strokes/:id/erase', async (req, res) => {
 // GET /rooms — список всех комнат (из таблицы rooms + room_id из stroke_events без записи в rooms)
 app.get('/rooms', async (req, res) => {
   try {
-    const [roomsResult, usedResult] = await Promise.all([
-      pool.query('SELECT room_id, name, updated_at FROM rooms ORDER BY updated_at DESC'),
-      pool.query('SELECT DISTINCT room_id FROM stroke_events'),
+    const [roomsRows, usedRows] = await Promise.all([
+      db.selectFrom('rooms').select(['room_id', 'name', 'updated_at']).orderBy('updated_at', 'desc').execute(),
+      db.selectFrom('stroke_events').select('room_id').distinct().execute(),
     ]);
+    type RoomsRow = Database['rooms'];
+    type UsedRoomRow = { room_id: string };
     const byId = new Map<string, { name: string; updatedAt: number }>();
-    for (const row of roomsResult.rows as Array<{ room_id: string; name: string; updated_at: string | number }>) {
+    for (const row of roomsRows as RoomsRow[]) {
       const updatedAt = Number(row.updated_at) || 0;
       byId.set(row.room_id, { name: row.name, updatedAt });
     }
-    const roomIds = new Set<string>(usedResult.rows.map((r: { room_id: string }) => r.room_id));
+    const roomIds = new Set((usedRows as UsedRoomRow[]).map((r) => r.room_id));
     for (const id of roomIds) {
       if (!byId.has(id)) {
         byId.set(id, { name: `Room ${id}`, updatedAt: 0 });
@@ -464,11 +489,10 @@ app.get('/rooms/:roomId/rename', async (req, res) => {
   }
   try {
     const updatedAt = Date.now();
-    await pool.query(
-      `INSERT INTO rooms (room_id, name, updated_at) VALUES ($1, $2, $3)
-       ON CONFLICT (room_id) DO UPDATE SET name = $2, updated_at = $3`,
-      [roomId, name, updatedAt]
-    );
+    await db.insertInto('rooms').values({ room_id: roomId, name, updated_at: updatedAt })
+      .onConflict((oc: { column: (c: 'room_id') => { doUpdateSet: (s: object) => unknown } }) =>
+        oc.column('room_id').doUpdateSet({ name, updated_at: updatedAt }))
+      .execute();
     const eventJson = JSON.stringify({ type: 'room_renamed', roomId, name, updatedAt });
     await redisClient.publish('room_events', eventJson);
     console.log(`[EventStore] Room renamed (GET): ${roomId} -> "${name}"`);
@@ -483,15 +507,11 @@ app.get('/rooms/:roomId/rename', async (req, res) => {
 app.get('/rooms/:roomId', async (req, res) => {
   try {
     const roomId = req.params.roomId || DEFAULT_ROOM;
-    const result = await pool.query(
-      'SELECT room_id, name, updated_at FROM rooms WHERE room_id = $1',
-      [roomId]
-    );
-    if (result.rows.length === 0) {
+    const row = await db.selectFrom('rooms').select(['room_id', 'name', 'updated_at']).where('room_id', '=', roomId).executeTakeFirst();
+    if (!row) {
       return res.json({ roomId, name: `Room ${roomId}`, updatedAt: 0 });
     }
-    const row = result.rows[0];
-    res.json({ roomId: row.room_id, name: row.name, updatedAt: parseInt(row.updated_at) });
+    res.json({ roomId: row.room_id, name: row.name, updatedAt: Number(row.updated_at) });
   } catch (error) {
     console.error('Error fetching room:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -504,11 +524,10 @@ async function handleSetRoomName(req: express.Request, res: express.Response): P
     const body = RoomNameSchema.parse(req.body);
     const name = body.name.trim();
     const updatedAt = Date.now();
-    await pool.query(
-      `INSERT INTO rooms (room_id, name, updated_at) VALUES ($1, $2, $3)
-       ON CONFLICT (room_id) DO UPDATE SET name = $2, updated_at = $3`,
-      [roomId, name, updatedAt]
-    );
+    await db.insertInto('rooms').values({ room_id: roomId, name, updated_at: updatedAt })
+      .onConflict((oc: { column: (c: 'room_id') => { doUpdateSet: (s: object) => unknown } }) =>
+        oc.column('room_id').doUpdateSet({ name, updated_at: updatedAt }))
+      .execute();
     const eventJson = JSON.stringify({ type: 'room_renamed', roomId, name, updatedAt });
     await redisClient.publish('room_events', eventJson);
     console.log(`[EventStore] Room renamed: ${roomId} -> "${name}"`);
@@ -532,16 +551,17 @@ app.post('/rooms/:roomId', handleSetRoomName);
 app.get('/talkers', async (req, res) => {
   try {
     const roomId = (req.query.roomId as string) || DEFAULT_ROOM;
-    const result = await pool.query(
-      'SELECT id, room_id, x, y, created_at FROM talkers WHERE room_id = $1 ORDER BY created_at ASC',
-      [roomId]
-    );
-    const talkers = result.rows.map((r: { id: string; room_id: string; x: string | number; y: string | number; created_at: string }) => ({
+    const rows = await db.selectFrom('talkers').select(['id', 'room_id', 'x', 'y', 'created_at'])
+      .where('room_id', '=', roomId)
+      .orderBy('created_at', 'asc')
+      .execute();
+    type TalkerRow = Database['talkers'];
+    const talkers = (rows as TalkerRow[]).map((r) => ({
       id: r.id,
       roomId: r.room_id,
       x: Number(r.x),
       y: Number(r.y),
-      createdAt: parseInt(String(r.created_at), 10),
+      createdAt: Number(r.created_at),
     }));
     res.json({ talkers });
   } catch (error) {
@@ -562,10 +582,7 @@ app.post('/talkers', async (req, res) => {
     const roomId = body.roomId || DEFAULT_ROOM;
     const id = uuidv4();
     const createdAt = Date.now();
-    await pool.query(
-      'INSERT INTO talkers (id, room_id, x, y, created_at) VALUES ($1, $2, $3, $4, $5)',
-      [id, roomId, body.x, body.y, createdAt]
-    );
+    await db.insertInto('talkers').values({ id, room_id: roomId, x: body.x, y: body.y, created_at: createdAt }).execute();
     const talker = { id, roomId, x: body.x, y: body.y, createdAt };
     const eventJson = JSON.stringify({ type: 'talker_created', roomId, talker });
     await redisClient.publish('talker_events', eventJson);
@@ -587,17 +604,21 @@ app.get('/talkers/:id/messages', async (req, res) => {
     const roomId = (req.query.roomId as string) || DEFAULT_ROOM;
     const limitParam = parseInt(req.query.limit as string);
     const limit = Number.isNaN(limitParam) ? 100 : Math.min(Math.max(1, limitParam), 500);
-    const result = await pool.query(
-      'SELECT id, talker_id, room_id, author_name, text, ts FROM talker_messages WHERE talker_id = $1 AND room_id = $2 ORDER BY ts ASC LIMIT $3',
-      [talkerId, roomId, limit]
-    );
-    const messages = result.rows.map((r: { id: string; talker_id: string; room_id: string; author_name: string; text: string; ts: string }) => ({
+    const rows = await db.selectFrom('talker_messages')
+      .select(['id', 'talker_id', 'room_id', 'author_name', 'text', 'ts'])
+      .where('talker_id', '=', talkerId)
+      .where('room_id', '=', roomId)
+      .orderBy('ts', 'asc')
+      .limit(limit)
+      .execute();
+    type MessageRow = Database['talker_messages'];
+    const messages = (rows as MessageRow[]).map((r) => ({
       id: r.id,
       talkerId: r.talker_id,
       roomId: r.room_id,
       authorName: r.author_name,
       text: r.text,
-      ts: parseInt(r.ts, 10),
+      ts: Number(r.ts),
     }));
     res.json({ messages });
   } catch (error) {
@@ -619,10 +640,9 @@ app.post('/talkers/:id/messages', async (req, res) => {
     const roomId = body.roomId || DEFAULT_ROOM;
     const id = uuidv4();
     const ts = Date.now();
-    await pool.query(
-      'INSERT INTO talker_messages (id, talker_id, room_id, author_name, text, ts) VALUES ($1, $2, $3, $4, $5, $6)',
-      [id, talkerId, roomId, body.authorName, body.text, ts]
-    );
+    await db.insertInto('talker_messages').values({
+      id, talker_id: talkerId, room_id: roomId, author_name: body.authorName, text: body.text, ts,
+    }).execute();
     const message = { id, talkerId, roomId, authorName: body.authorName, text: body.text, ts };
     const eventJson = JSON.stringify({ type: 'talker_message', roomId, message });
     await redisClient.publish('talker_events', eventJson);
