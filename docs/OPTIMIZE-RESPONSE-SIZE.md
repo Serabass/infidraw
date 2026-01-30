@@ -95,7 +95,7 @@
 ## Внесённые изменения (реализовано)
 
 - **event-store:** GET `/events` при `Accept: application/msgpack` отдаёт msgpack вместо JSON; добавлена `sendEventsPayload(res, payload, acceptHeader)`.
-- **frontend-v2:** пагинация по 500 событий в `SyncService.loadExistingStrokes()` (JSON, без msgpack — из-за Node 16 и конфликтов зависимостей в Docker). Основной выигрыш — размер одного ответа, не один гигабайт.
+- **frontend-v2:** пагинация по 500 событий + **бинарный формат**: зависимость `msgpack-lite` (Node 16–совместимый), `ApiService.getStrokes(..., useMsgpack=true)` шлёт `Accept: application/msgpack` и декодирует ответ через `msgpack.decode()`. Чанк ~6 MB в JSON → ~3–4 MB в msgpack.
 - **nginx:** в `gzip_types` добавлен `application/msgpack`.
 - **frontend-v2 Dockerfile:** `npm install --legacy-peer-deps` (lockfile был рассинхронизирован, peer-конфликты angular-eslint).
 

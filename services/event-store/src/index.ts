@@ -289,15 +289,26 @@ app.get('/events', async (req, res) => {
       ? (since === 0 ? 10000 : 100)
       : Math.min(Math.max(0, limitParam), 10000);
 
-    // Full sync (since=0): try Redis cache to avoid slow DB on repeated requests
+    // Full sync (since=0, no limit or limit matches cache): try Redis cache
+    // Only use cache when we would return the full cached payload (no limit or limit >= cached length)
     if (since === 0) {
       const cacheKey = EVENTS_FULL_CACHE_PREFIX + roomId;
       try {
         const cached = await redisClient.get(cacheKey);
         if (cached) {
           const payload = JSON.parse(cached) as { events: StrokeEvent[]; roomId: string; roomName: string };
-          console.log(`[EventStore] GET /events room=${roomId} cache HIT, ${payload.events.length} events, ${Date.now() - totalStart}ms`);
-          return sendEventsPayload(res, payload, acceptHeader);
+          const cachedCount = payload.events.length;
+          const useCache = limit >= cachedCount;
+          if (useCache) {
+            console.log(`[EventStore] GET /events room=${roomId} cache HIT, ${cachedCount} events, ${Date.now() - totalStart}ms`);
+            return sendEventsPayload(res, payload, acceptHeader);
+          }
+          // Client asked for fewer events (e.g. limit=500): slice cached payload and return
+          if (limit < cachedCount) {
+            const sliced = { ...payload, events: payload.events.slice(0, limit) };
+            console.log(`[EventStore] GET /events room=${roomId} cache HIT (sliced to ${limit}), ${Date.now() - totalStart}ms`);
+            return sendEventsPayload(res, sliced, acceptHeader);
+          }
         }
       } catch (e) {
         // cache miss or parse error — fall through to DB
