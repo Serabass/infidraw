@@ -436,6 +436,10 @@ async function handleSetRoomName(req: express.Request, res: express.Response): P
 app.put('/rooms/:roomId', handleSetRoomName);
 app.post('/rooms/:roomId', handleSetRoomName);
 
+app.get('/health', (_req, res) => {
+  res.json({ status: 'ok' });
+});
+
 const PORT = process.env.PORT || 3000;
 
 async function start() {

@@ -482,6 +482,10 @@ app.get(/^\/snapshots\/(.+)$/, async (req, res) => {
   }
 });
 
+app.get('/health', (_req, res) => {
+  res.json({ status: 'ok' });
+});
+
 const PORT = process.env.PORT || 3000;
 
 async function start() {
