@@ -2,7 +2,8 @@
 param(
   [switch]$NoCache,
   [switch]$FrontendOnly,
-  [switch]$Verbose
+  [switch]$Verbose,
+  [switch]$ChangedOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -14,32 +15,14 @@ $builderName = "infidraw-remote"
 
 try {
   # docker driver does not support cache export (type=registry). Use docker-container driver.
-  $existing = docker buildx ls --format "{{.Name}}" 2>$null
-  if ($existing -notmatch [regex]::Escape($builderName)) {
-    docker buildx create --name $builderName --driver docker-container --use 2>$null
-  }
   docker buildx use $builderName 2>$null
+  if ($LASTEXITCODE -ne 0) {
+    docker buildx create --name $builderName --driver docker-container --use
+  }
 
   $startTime = Get-Date
 
-  $bakeArgs = @(
-    "buildx", "bake",
-    "--allow", "security.insecure",
-    "--file", "docker-bake.hcl",
-    "--load",
-    "--push"
-  )
-  if ($NoCache) { $bakeArgs += "--no-cache" }
-  if ($FrontendOnly) { $bakeArgs += "frontend-v2" }
-  if ($Verbose) { $bakeArgs += "--progress=plain" }
-
-  docker @bakeArgs #1> bake.log 2>&1
-
-  $endTime = Get-Date
-  $executionTime = $endTime - $startTime
-
-  Write-Output ("Elapsed: {0:hh\:mm\:ss\.fff}" -f [TimeSpan]::FromSeconds($executionTime.TotalSeconds))
-
+  $targetsToBuild = $null
   $deployments = @(
     "event-store",
     "api-gateway",
@@ -50,7 +33,56 @@ try {
     "frontend-v2",
     "snapshot-worker"
   )
-  if ($FrontendOnly) { $deployments = @("frontend-v2") }
+
+  if ($FrontendOnly) {
+    $targetsToBuild = @("frontend-v2")
+    $deployments = @("frontend-v2")
+  } elseif ($ChangedOnly) {
+    $baseRef = "origin/main"
+    try { git rev-parse --verify $baseRef 2>$null | Out-Null } catch { $baseRef = "HEAD~1" }
+    $changed = @(git diff --name-only $baseRef 2>$null)
+    $pathToTarget = @{
+      "frontend-v2" = "frontend-v2"
+      "services/event-store" = "event-store"
+      "services/api-gateway" = "api-gateway"
+      "services/realtime-service" = "realtime-service"
+      "services/tile-service" = "tile-service"
+      "services/snapshot-worker" = "snapshot-worker"
+      "services/metrics-service" = "metrics-service"
+      "services/admin-service" = "admin-service"
+    }
+    $targetsToBuild = @()
+    foreach ($p in $changed) {
+      foreach ($path in $pathToTarget.Keys) {
+        if ($p -like "$path*") { $targetsToBuild += $pathToTarget[$path]; break }
+      }
+    }
+    $targetsToBuild = $targetsToBuild | Sort-Object -Unique
+    if ($targetsToBuild.Count -eq 0) {
+      Write-Output "ChangedOnly: no service/frontend changes (vs $baseRef), nothing to build."
+      exit 0
+    }
+    $deployments = $targetsToBuild
+    if ($Verbose) { Write-Output "ChangedOnly: building $($targetsToBuild -join ', ')" }
+  }
+
+  $bakeArgs = @(
+    "buildx", "bake",
+    "--allow", "security.insecure",
+    "--file", "docker-bake.hcl",
+    "--load",
+    "--push"
+  )
+  if ($NoCache) { $bakeArgs += "--no-cache" }
+  if ($targetsToBuild) { $bakeArgs += $targetsToBuild }
+  if ($Verbose) { $bakeArgs += "--progress=plain" }
+
+  docker @bakeArgs #1> bake.log 2>&1
+
+  $endTime = Get-Date
+  $executionTime = $endTime - $startTime
+
+  Write-Output ("Elapsed: {0:hh\:mm\:ss\.fff}" -f [TimeSpan]::FromSeconds($executionTime.TotalSeconds))
 
   $deployList = $deployments | ForEach-Object { "deployment/$_" }
   kubectl rollout restart -n infidraw $deployList
