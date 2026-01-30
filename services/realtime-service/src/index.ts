@@ -119,15 +119,26 @@ async function initRedis() {
   console.log('[Redis] Subscribed to stroke_events and room_events channels');
 }
 
-wss.on('connection', (ws: WebSocket) => {
+wss.on('connection', (ws: WebSocket, req: { url?: string }) => {
   console.log(`[WS] New client connected, total: ${clients.size + 1}`);
+  let roomIdFromUrl = '1';
+  if (req.url) {
+    try {
+      const url = new URL(req.url, 'http://localhost');
+      const q = url.searchParams.get('roomId');
+      if (q) roomIdFromUrl = q;
+    } catch {
+      // ignore parse error
+    }
+  }
   const client: Client = {
     ws,
     subscribedTiles: new Set(),
-    roomId: '1',
+    roomId: roomIdFromUrl,
   };
 
   clients.set(ws, client);
+  console.log(`[WS] Client room from URL: ${client.roomId}`);
 
   ws.on('message', (data: Buffer) => {
     try {
