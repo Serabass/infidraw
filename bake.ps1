@@ -1,7 +1,10 @@
+
 param(
   [switch]$NoCache,
   [switch]$FrontendOnly
 )
+
+$ErrorActionPreference = "Stop"
 
 $startTime = Get-Date
 
@@ -15,7 +18,7 @@ $bakeArgs = @(
 if ($NoCache) { $bakeArgs += "--no-cache" }
 if ($FrontendOnly) { $bakeArgs += "frontend-v2" }
 
-docker @bakeArgs 1> bake.log 2>&1
+docker @bakeArgs #1> bake.log 2>&1
 
 $endTime = Get-Date
 $executionTime = $endTime - $startTime
