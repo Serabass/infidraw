@@ -10,6 +10,8 @@ $services = @(
     "services/api-gateway",
     "frontend-v2"
 )
+# Projects with peer dep conflicts (e.g. old @angular-eslint vs Angular 10)
+$legacyPeerDeps = @("frontend-v2")
 
 Write-Host "Generating package-lock.json files using Docker..." -ForegroundColor Cyan
 
@@ -42,12 +44,13 @@ foreach ($service in $services) {
         # Используем абсолютный путь для Windows
         $absolutePath = (Resolve-Path $path).Path
         
+        $legacyFlag = if ($legacyPeerDeps -contains (Split-Path $service -Leaf)) { " --legacy-peer-deps" } else { "" }
         Write-Host "  Running npm install in Docker..." -ForegroundColor Gray
         docker run --rm `
             -v "${absolutePath}:/app" `
             -w /app `
             node:20-alpine `
-            sh -c "npm install --package-lock-only"
+            sh -c "npm install --package-lock-only --no-audit --no-fund --loglevel=warn$legacyFlag"
         
         if ($LASTEXITCODE -eq 0 -and (Test-Path $lockFile)) {
             Write-Host "  Generated package-lock.json" -ForegroundColor Green
