@@ -26,8 +26,13 @@ RUN npm run build
 ##################################################################################
 
 # Stage 4: Runtime (minimal: only runtime libs for canvas, no build tools)
-FROM node:20-alpine AS runtime
+FROM node:20-alpine AS apk-runtime-deps
 RUN apk add --no-cache cairo jpeg pango giflib
+
+##################################################################################
+
+# Stage 5: Runtime
+FROM apk-runtime-deps AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 COPY package*.json ./
