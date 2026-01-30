@@ -78,6 +78,7 @@ services:
     volumes:
       - ./services/event-store:/app
       - /app/node_modules
+    command: ["npm", "run", "dev"]
 
   snapshot-worker:
     build: ./services/snapshot-worker
@@ -136,6 +137,7 @@ services:
     volumes:
       - ./services/realtime-service:/app
       - /app/node_modules
+    command: ["npm", "run", "dev"]
 
   metrics-service:
     build: ./services/metrics-service
@@ -160,6 +162,7 @@ services:
     volumes:
       - ./services/metrics-service:/app
       - /app/node_modules
+    command: ["npm", "run", "dev"]
 
   admin-service:
     build: ./services/admin-service
@@ -185,6 +188,7 @@ services:
     volumes:
       - ./services/admin-service:/app
       - /app/node_modules
+    command: ["npm", "run", "dev"]
 
   frontend-v2:
     build: ./frontend-v2

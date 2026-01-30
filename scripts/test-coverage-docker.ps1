@@ -31,17 +31,13 @@ foreach ($name in $services) {
     $servicePath = (Resolve-Path $servicePath).Path
     Write-Host ""
     Write-Host "=== $name ===" -ForegroundColor Cyan
-    $prevErrAction = $ErrorActionPreference
-    $ErrorActionPreference = "Continue"
-    $out = docker run --rm `
-        -v "${servicePath}:/app" `
-        -w /app `
-        -e NODE_ENV=test `
-        $nodeImage `
-        sh -c "npm install --silent 2>/dev/null; npm run test:coverage" 2>&1
+    $logFile = [System.IO.Path]::GetTempFileName()
+    $dockerArgs = "run --rm -v `"${servicePath}:/app`" -w /app -e NODE_ENV=test $nodeImage sh -c `"npm install --silent 2>/dev/null; npm run test:coverage`""
+    cmd /c "docker $dockerArgs > `"$logFile`" 2>&1"
     $exitCode = $LASTEXITCODE
-    $ErrorActionPreference = $prevErrAction
-    $out | Out-Host
+    $out = Get-Content -Path $logFile -Raw -ErrorAction SilentlyContinue
+    Remove-Item -Path $logFile -Force -ErrorAction SilentlyContinue
+    if ($out) { $out | Out-Host }
 
     if ($exitCode -ne 0) {
         $failed += $name

@@ -40,7 +40,13 @@
 
 Эффект: меньше накладных расходов, нормальные схемы/валидация.
 
-### 1.4 Postgres: батчи, prepared statements, backpressure
+### 1.4 GET /events: кэш и диагностика
+
+- **Где:** `event-store` — GET `/events?roomId=&since=0` (полная выдача событий комнаты).
+- **Что уже сделано:** тайминг в логах (`db=...ms total=...ms`), Redis-кэш для `since=0` (TTL 10 сек, инвалидация при записи в комнату). Повторные запросы и вторая вкладка получают ответ из кэша.
+- **Если всё ещё медленно:** проверить план запроса в Postgres: `EXPLAIN (ANALYZE, BUFFERS) SELECT event_type, stroke_id, stroke_data, timestamp FROM stroke_events WHERE room_id = $1 AND timestamp > $2 ORDER BY timestamp ASC LIMIT $3` — должен использоваться индекс `idx_stroke_events_room_timestamp`. Большой `stroke_data` (много точек) увеличивает время чтения с диска.
+
+### 1.5 Postgres: батчи, prepared statements, backpressure
 
 - **Где:** event-store — вставки в `stroke_events` и `tile_events`.
 - **Что:** пачки `INSERT ... VALUES (...),(...),...`, prepared statements, пул; при росте очереди записи — backpressure (буфер или дроп/замедление).

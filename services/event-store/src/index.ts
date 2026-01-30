@@ -41,6 +41,9 @@ const redisClient = createClient({
   url: process.env.REDIS_URL,
 });
 
+const EVENTS_FULL_CACHE_PREFIX = 'events:full:';
+const EVENTS_FULL_CACHE_TTL_SEC = 10;
+
 const StrokeSchema = z.object({
   tool: z.enum(['pen', 'brush', 'marker', 'highlighter', 'eraser', 'pencil', 'chalk']),
   color: z.string(),
@@ -189,6 +192,8 @@ app.post('/strokes', async (req, res) => {
       );
     }
 
+    await redisClient.del(EVENTS_FULL_CACHE_PREFIX + roomId).catch(() => {});
+
     const eventPayload = { ...event, roomId };
     const eventBytes = Buffer.from(msgpackEncode(eventPayload));
     await redisClient.publish('stroke_events', eventBytes);
@@ -229,6 +234,7 @@ app.get('/strokes/:id', async (req, res) => {
 
 // GET /events - получить события и название комнаты (roomName по тому же маршруту, что и /api/events)
 app.get('/events', async (req, res) => {
+  const totalStart = Date.now();
   try {
     const roomId = (req.query.roomId as string) || DEFAULT_ROOM;
     const since = parseInt(req.query.since as string) || 0;
@@ -237,6 +243,22 @@ app.get('/events', async (req, res) => {
       ? (since === 0 ? 10000 : 100)
       : Math.min(Math.max(0, limitParam), 10000);
 
+    // Full sync (since=0): try Redis cache to avoid slow DB on repeated requests
+    if (since === 0) {
+      const cacheKey = EVENTS_FULL_CACHE_PREFIX + roomId;
+      try {
+        const cached = await redisClient.get(cacheKey);
+        if (cached) {
+          const payload = JSON.parse(cached) as { events: StrokeEvent[]; roomId: string; roomName: string };
+          console.log(`[EventStore] GET /events room=${roomId} cache HIT, ${payload.events.length} events, ${Date.now() - totalStart}ms`);
+          return res.json(payload);
+        }
+      } catch (e) {
+        // cache miss or parse error — fall through to DB
+      }
+    }
+
+    const queryStart = Date.now();
     const [result, nameRow] = await Promise.all([
       pool.query(
         `SELECT event_type, stroke_id, stroke_data, timestamp 
@@ -248,6 +270,7 @@ app.get('/events', async (req, res) => {
       ),
       pool.query('SELECT name FROM rooms WHERE room_id = $1', [roomId]),
     ]);
+    const queryMs = Date.now() - queryStart;
 
     const events: StrokeEvent[] = result.rows.map((row) => ({
       type: row.event_type as StrokeEvent['type'],
@@ -260,7 +283,16 @@ app.get('/events', async (req, res) => {
       ? (nameRow.rows[0] as { name: string }).name
       : `Room ${roomId}`;
 
-    res.json({ events, roomId, roomName });
+    const payload = { events, roomId, roomName };
+    if (since === 0) {
+      const cacheKey = EVENTS_FULL_CACHE_PREFIX + roomId;
+      await redisClient.setEx(cacheKey, EVENTS_FULL_CACHE_TTL_SEC, JSON.stringify(payload)).catch(() => {});
+    }
+
+    const totalMs = Date.now() - totalStart;
+    console.log(`[EventStore] GET /events room=${roomId} since=${since} rows=${events.length} db=${queryMs}ms total=${totalMs}ms`);
+
+    res.json(payload);
   } catch (error) {
     console.error('Error fetching events:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -311,6 +343,8 @@ app.post('/strokes/:id/erase', async (req, res) => {
         );
       }
     }
+
+    await redisClient.del(EVENTS_FULL_CACHE_PREFIX + roomId).catch(() => {});
 
     const eventPayload = { ...event, hiddenPointIndices: body.hiddenPointIndices, roomId };
     const eventBytes = Buffer.from(msgpackEncode(eventPayload));
