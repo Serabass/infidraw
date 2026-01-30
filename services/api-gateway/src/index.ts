@@ -83,6 +83,17 @@ app.use(
 );
 
 app.use(
+  '/api/talkers',
+  createProxyMiddleware({
+    target: process.env.EVENT_STORE_URL || 'http://event-store:3000',
+    changeOrigin: true,
+    pathRewrite: {
+      '^/api/talkers': '/talkers',
+    },
+  })
+);
+
+app.use(
   '/api/metrics',
   createProxyMiddleware({
     target: process.env.METRICS_SERVICE_URL || 'http://metrics-service:3000',

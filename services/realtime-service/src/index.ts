@@ -116,7 +116,26 @@ async function initRedis() {
     }
   });
 
-  console.log('[Redis] Subscribed to stroke_events and room_events channels');
+  await subscriber.subscribe('talker_events', (message, channel) => {
+    try {
+      const data = JSON.parse(message);
+      const messageRoomId = (data.roomId as string) || '1';
+      if ((data.type === 'talker_created' && data.talker) || (data.type === 'talker_message' && data.message)) {
+        let notifiedCount = 0;
+        for (const [ws, client] of clients.entries()) {
+          if ((client.roomId || '1') === messageRoomId && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify(data));
+            notifiedCount++;
+          }
+        }
+        console.log(`[Redis] Notified ${notifiedCount} clients (room=${messageRoomId}) about ${data.type}`);
+      }
+    } catch (error) {
+      console.error('Error processing talker event:', error);
+    }
+  });
+
+  console.log('[Redis] Subscribed to stroke_events, room_events and talker_events channels');
 }
 
 wss.on('connection', (ws: WebSocket, req: { url?: string }) => {

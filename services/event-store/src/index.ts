@@ -129,6 +129,36 @@ async function initDb() {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_tile_events_room_tile_id
       ON tile_events (room_id, tile_id, id);
   `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS talkers (
+      id VARCHAR(36) PRIMARY KEY,
+      room_id VARCHAR(64) NOT NULL,
+      x DOUBLE PRECISION NOT NULL,
+      y DOUBLE PRECISION NOT NULL,
+      created_at BIGINT NOT NULL
+    );
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_talkers_room_id ON talkers(room_id);
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS talker_messages (
+      id VARCHAR(36) PRIMARY KEY,
+      talker_id VARCHAR(36) NOT NULL,
+      room_id VARCHAR(64) NOT NULL,
+      author_name VARCHAR(255) NOT NULL,
+      text TEXT NOT NULL,
+      ts BIGINT NOT NULL
+    );
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_talker_messages_talker_id ON talker_messages(talker_id);
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_talker_messages_room_ts ON talker_messages(room_id, ts);
+  `);
 }
 
 async function initRedis() {
@@ -469,6 +499,116 @@ async function handleSetRoomName(req: express.Request, res: express.Response): P
 // PUT и POST — изменить название комнаты (если прокси вдруг пропустит)
 app.put('/rooms/:roomId', handleSetRoomName);
 app.post('/rooms/:roomId', handleSetRoomName);
+
+// ——— Talkers (govorilki) ———
+// GET /talkers?roomId= — list talkers in room
+app.get('/talkers', async (req, res) => {
+  try {
+    const roomId = (req.query.roomId as string) || DEFAULT_ROOM;
+    const result = await pool.query(
+      'SELECT id, room_id, x, y, created_at FROM talkers WHERE room_id = $1 ORDER BY created_at ASC',
+      [roomId]
+    );
+    const talkers = result.rows.map((r: { id: string; room_id: string; x: string | number; y: string | number; created_at: string }) => ({
+      id: r.id,
+      roomId: r.room_id,
+      x: Number(r.x),
+      y: Number(r.y),
+      createdAt: parseInt(String(r.created_at), 10),
+    }));
+    res.json({ talkers });
+  } catch (error) {
+    console.error('Error listing talkers:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /talkers — create talker (body: roomId?, x, y)
+const TalkerCreateSchema = z.object({
+  roomId: z.string().optional(),
+  x: z.number(),
+  y: z.number(),
+});
+app.post('/talkers', async (req, res) => {
+  try {
+    const body = TalkerCreateSchema.parse(req.body);
+    const roomId = body.roomId || DEFAULT_ROOM;
+    const id = uuidv4();
+    const createdAt = Date.now();
+    await pool.query(
+      'INSERT INTO talkers (id, room_id, x, y, created_at) VALUES ($1, $2, $3, $4, $5)',
+      [id, roomId, body.x, body.y, createdAt]
+    );
+    const talker = { id, roomId, x: body.x, y: body.y, createdAt };
+    const eventJson = JSON.stringify({ type: 'talker_created', roomId, talker });
+    await redisClient.publish('talker_events', eventJson);
+    console.log(`[EventStore] Talker created: ${id} at (${body.x}, ${body.y}) room=${roomId}`);
+    res.status(201).json(talker);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: 'Invalid talker data', details: error.errors });
+    }
+    console.error('Error creating talker:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET /talkers/:id/messages?roomId=&limit=
+app.get('/talkers/:id/messages', async (req, res) => {
+  try {
+    const talkerId = req.params.id;
+    const roomId = (req.query.roomId as string) || DEFAULT_ROOM;
+    const limitParam = parseInt(req.query.limit as string);
+    const limit = Number.isNaN(limitParam) ? 100 : Math.min(Math.max(1, limitParam), 500);
+    const result = await pool.query(
+      'SELECT id, talker_id, room_id, author_name, text, ts FROM talker_messages WHERE talker_id = $1 AND room_id = $2 ORDER BY ts ASC LIMIT $3',
+      [talkerId, roomId, limit]
+    );
+    const messages = result.rows.map((r: { id: string; talker_id: string; room_id: string; author_name: string; text: string; ts: string }) => ({
+      id: r.id,
+      talkerId: r.talker_id,
+      roomId: r.room_id,
+      authorName: r.author_name,
+      text: r.text,
+      ts: parseInt(r.ts, 10),
+    }));
+    res.json({ messages });
+  } catch (error) {
+    console.error('Error listing talker messages:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /talkers/:id/messages — send message (body: roomId?, authorName, text)
+const TalkerMessageSchema = z.object({
+  roomId: z.string().optional(),
+  authorName: z.string().min(1).max(255),
+  text: z.string().max(10000),
+});
+app.post('/talkers/:id/messages', async (req, res) => {
+  try {
+    const talkerId = req.params.id;
+    const body = TalkerMessageSchema.parse(req.body);
+    const roomId = body.roomId || DEFAULT_ROOM;
+    const id = uuidv4();
+    const ts = Date.now();
+    await pool.query(
+      'INSERT INTO talker_messages (id, talker_id, room_id, author_name, text, ts) VALUES ($1, $2, $3, $4, $5, $6)',
+      [id, talkerId, roomId, body.authorName, body.text, ts]
+    );
+    const message = { id, talkerId, roomId, authorName: body.authorName, text: body.text, ts };
+    const eventJson = JSON.stringify({ type: 'talker_message', roomId, message });
+    await redisClient.publish('talker_events', eventJson);
+    console.log(`[EventStore] Talker message: ${talkerId} from "${body.authorName}"`);
+    res.status(201).json(message);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: 'Invalid message data', details: error.errors });
+    }
+    console.error('Error creating talker message:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
 
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok' });
