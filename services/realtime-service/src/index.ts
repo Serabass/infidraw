@@ -1,7 +1,19 @@
+import { decode as msgpackDecode } from '@msgpack/msgpack';
 import express from 'express';
 import { WebSocketServer, WebSocket } from 'ws';
 import { createClient } from 'redis';
 import type { StrokeEvent } from './types';
+
+function parseStrokeEventMessage(message: string | Buffer): StrokeEvent | null {
+  try {
+    if (Buffer.isBuffer(message)) {
+      return msgpackDecode(new Uint8Array(message)) as StrokeEvent;
+    }
+    return JSON.parse(message as string) as StrokeEvent;
+  } catch {
+    return null;
+  }
+}
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -50,7 +62,11 @@ async function initRedis() {
   // Сначала подписываемся, потом устанавливаем обработчик
   await subscriber.subscribe('stroke_events', (message, channel) => {
     try {
-      const event: StrokeEvent = JSON.parse(message);
+      const event = parseStrokeEventMessage(message);
+      if (!event) {
+        console.error('[Redis] Failed to decode stroke_events message');
+        return;
+      }
       console.log(`[Redis] Received stroke event: ${event.type}, strokeId: ${event.strokeId}`);
 
       const messageRoomId = (event as any).roomId || '1';

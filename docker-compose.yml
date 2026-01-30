@@ -78,6 +78,14 @@ services:
       - ./services/event-store:/app
       - /app/node_modules
 
+  snapshot-worker:
+    build: ./services/snapshot-worker
+    expose:
+      - "8080"
+    environment:
+      PORT: 8080
+    # no DB/Redis — stateless render service
+
   tile-service:
     build: ./services/tile-service
     expose:
@@ -91,6 +99,7 @@ services:
       MINIO_BUCKET: tile-snapshots
       PORT: 3000
       TILE_SIZE: 512
+      SNAPSHOT_WORKER_URL: http://snapshot-worker:8080
     depends_on:
       postgres:
         condition: service_healthy
@@ -98,6 +107,8 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      snapshot-worker:
+        condition: service_started
     volumes:
       - ./services/tile-service:/app
       - /app/node_modules

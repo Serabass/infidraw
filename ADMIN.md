@@ -1,5 +1,7 @@
 # Административные команды
 
+> Дорожная карта по производительности и стеку (бинарный протокол, uWebSockets, snapshot-worker на Rust/Go): [docs/PERF-ROADMAP.md](docs/PERF-ROADMAP.md)
+
 ## Требования
 
 - Docker и Docker Compose

@@ -4,6 +4,7 @@ group "default" {
     "api-gateway",
     "realtime-service",
     "tile-service",
+    "snapshot-worker",
     "metrics-service",
     "admin-service",
     "frontend-v2"
@@ -59,6 +60,17 @@ target "tile-service" {
   cache-from = [
     "type=registry,ref=${REGISTRY}/infidraw/tile-service:buildcache",
     "type=registry,ref=${REGISTRY}/infidraw/tile-service:latest",
+  ]
+}
+
+target "snapshot-worker" {
+  context = "./services/snapshot-worker"
+  dockerfile = "Dockerfile"
+  tags = ["${REGISTRY}/infidraw/snapshot-worker:${TAG}"]
+  cache-to = ["type=inline"]
+  cache-from = [
+    "type=registry,ref=${REGISTRY}/infidraw/snapshot-worker:buildcache",
+    "type=registry,ref=${REGISTRY}/infidraw/snapshot-worker:latest",
   ]
 }
 

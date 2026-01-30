@@ -1,4 +1,5 @@
 import express from 'express';
+import { decode as msgpackDecode, encode as msgpackEncode } from '@msgpack/msgpack';
 import { Pool } from 'pg';
 import { createClient } from 'redis';
 import { v4 as uuidv4 } from 'uuid';
@@ -7,6 +8,7 @@ import type { Stroke, StrokeEvent } from './types';
 
 const app = express();
 app.use(express.json({ limit: '10mb' }));
+app.use(express.raw({ type: 'application/msgpack', limit: '10mb' }));
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -132,12 +134,17 @@ async function initRedis() {
 
 const DEFAULT_ROOM = '1';
 
-// POST /strokes - создать новый stroke
+// POST /strokes - создать новый stroke (accepts JSON or application/msgpack)
 app.post('/strokes', async (req, res) => {
   try {
-    const roomId = (req.body.roomId as string) || DEFAULT_ROOM;
-    console.log(`[EventStore] Received stroke request: room=${roomId}, tool=${req.body.tool}, points=${req.body.points?.length || 0}`);
-    const body = StrokeSchema.parse(req.body);
+    let rawBody: unknown = req.body;
+    if (req.is('application/msgpack') && Buffer.isBuffer(req.body)) {
+      rawBody = msgpackDecode(new Uint8Array(req.body)) as unknown;
+    }
+    const roomId = (rawBody as { roomId?: string }).roomId || DEFAULT_ROOM;
+    const bodyObj = typeof rawBody === 'object' && rawBody !== null ? rawBody : {};
+    console.log(`[EventStore] Received stroke request: room=${roomId}, tool=${(bodyObj as { tool?: string }).tool}, points=${Array.isArray((bodyObj as { points?: unknown[] }).points) ? (bodyObj as { points: unknown[] }).points.length : 0}`);
+    const body = StrokeSchema.parse(bodyObj);
     const strokeId = uuidv4();
     const timestamp = Date.now();
 
@@ -182,9 +189,10 @@ app.post('/strokes', async (req, res) => {
       );
     }
 
-    const eventJson = JSON.stringify({ ...event, roomId });
-    await redisClient.publish('stroke_events', eventJson);
-    console.log(`[EventStore] Published stroke event to Redis: ${event.strokeId}, tool=${stroke.tool}, points=${stroke.points.length}, color=${stroke.color}`);
+    const eventPayload = { ...event, roomId };
+    const eventBytes = Buffer.from(msgpackEncode(eventPayload));
+    await redisClient.publish('stroke_events', eventBytes);
+    console.log(`[EventStore] Published stroke event to Redis (msgpack): ${event.strokeId}, tool=${stroke.tool}, points=${stroke.points.length}, color=${stroke.color}`);
 
     res.status(201).json({ strokeId, stroke });
   } catch (error) {
@@ -304,9 +312,10 @@ app.post('/strokes/:id/erase', async (req, res) => {
       }
     }
 
-    const eventJson = JSON.stringify({ ...event, hiddenPointIndices: body.hiddenPointIndices, roomId });
-    await redisClient.publish('stroke_events', eventJson);
-    console.log(`[EventStore] Published stroke_erased: ${strokeId}, points: ${body.hiddenPointIndices.length}`);
+    const eventPayload = { ...event, hiddenPointIndices: body.hiddenPointIndices, roomId };
+    const eventBytes = Buffer.from(msgpackEncode(eventPayload));
+    await redisClient.publish('stroke_events', eventBytes);
+    console.log(`[EventStore] Published stroke_erased (msgpack): ${strokeId}, points: ${body.hiddenPointIndices.length}`);
 
     res.status(201).json({ strokeId, hiddenPointIndices: body.hiddenPointIndices });
   } catch (error) {

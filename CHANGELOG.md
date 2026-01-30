@@ -6,6 +6,26 @@
 
 ## [Unreleased]
 
+### Added — Snapshot-worker (Go) и бинарный формат (msgpack)
+
+#### 1) Snapshot-worker (Go)
+
+- Новый сервис **snapshot-worker** на Go: рендер тайла в PNG вынесен из Node в отдельный процесс.
+- **Контракт:** `POST /render` — тело JSON: `{ tileX, tileY, tileSize, strokes }`, ответ: `image/png`.
+- Рендер через библиотеку **gg** (canvas-like API); ластик рисуется белым по белому фону (тот же визуал, что и раньше).
+- **tile-service:** при наличии `SNAPSHOT_WORKER_URL` отправляет запрос в воркер и загружает полученный PNG в MinIO; при отсутствии URL или ошибке воркера — fallback на локальный `createCanvas` (node-canvas).
+- В **docker-compose** добавлен сервис `snapshot-worker`, tile-service получает `SNAPSHOT_WORKER_URL: http://snapshot-worker:8080`.
+
+#### 2) Бинарный формат на горячем пути (msgpack)
+
+- **event-store:** публикация в Redis по каналу `stroke_events` переведена на **msgpack** (вместо JSON). POST `/strokes` принимает как JSON, так и **Content-Type: application/msgpack** (тело — msgpack-encoded payload).
+- **realtime-service:** подписка на `stroke_events` декодирует сообщения: если пришёл Buffer — msgpack.decode, иначе JSON.parse (обратная совместимость). Клиентам по WS по-прежнему отдаётся JSON.
+- Зависимости: в event-store и realtime-service добавлен `@msgpack/msgpack`.
+
+Итого: рендер снапшотов не блокирует event loop Node; Redis между event-store и realtime использует msgpack (меньше CPU и трафика). Фронт и публичный API по-прежнему могут использовать JSON.
+
+---
+
 ### Added — Паттерн «тайл → снапшот → дельта» (оптимизация запросов)
 
 Внедрены рекомендации по масштабируемости для «вечного» canvas (Postgres + Redis + MinIO): запросы по тайлам без bbox-мясорубки.

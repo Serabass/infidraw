@@ -32,6 +32,7 @@ const minioClient = new Minio.Client({
 });
 
 const BUCKET_NAME = process.env.MINIO_BUCKET || 'tile-snapshots';
+const SNAPSHOT_WORKER_URL = process.env.SNAPSHOT_WORKER_URL || '';
 
 function getTileCoords(worldX: number, worldY: number): [number, number] {
   return [Math.floor(worldX / TILE_SIZE), Math.floor(worldY / TILE_SIZE)];
@@ -312,6 +313,41 @@ async function renderTileSnapshot(tileX: number, tileY: number, strokes: Stroke[
   return canvas.toBuffer('image/png');
 }
 
+/** Render via snapshot-worker (Go) if configured, else local canvas. */
+async function renderTileSnapshotOrWorker(tileX: number, tileY: number, strokes: Stroke[]): Promise<Buffer> {
+  if (SNAPSHOT_WORKER_URL) {
+    try {
+      const res = await fetch(`${SNAPSHOT_WORKER_URL.replace(/\/$/, '')}/render`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tileX,
+          tileY,
+          tileSize: TILE_SIZE,
+          strokes: strokes.map((s) => ({
+            id: s.id,
+            ts: s.ts,
+            tool: s.tool,
+            color: s.color,
+            width: s.width,
+            points: s.points,
+            authorId: s.authorId,
+            hidden: s.hidden,
+          })),
+        }),
+      });
+      if (!res.ok) {
+        throw new Error(`snapshot-worker returned ${res.status}`);
+      }
+      const arrayBuffer = await res.arrayBuffer();
+      return Buffer.from(arrayBuffer);
+    } catch (err) {
+      console.warn('[TileService] Snapshot worker failed, falling back to local render:', err);
+    }
+  }
+  return renderTileSnapshot(tileX, tileY, strokes);
+}
+
 // GET /tiles - получить тайлы для области
 app.get('/tiles', async (req, res) => {
   try {
@@ -391,7 +427,7 @@ app.get('/tiles', async (req, res) => {
           const snapshotVersion = Date.now();
           const snapshotKey = `room_${roomId}/tile_${tileX}_${tileY}_${snapshotVersion}.png`;
 
-          const snapshotBuffer = await renderTileSnapshot(tileX, tileY, strokes);
+          const snapshotBuffer = await renderTileSnapshotOrWorker(tileX, tileY, strokes);
           await minioClient.putObject(BUCKET_NAME, snapshotKey, snapshotBuffer, snapshotBuffer.length, {
             'Content-Type': 'image/png',
           });
