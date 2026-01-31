@@ -698,13 +698,13 @@ app.get('/health', (_req, res) => {
   res.json({ status: 'ok' });
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = parseInt(process.env.PORT ?? '3000', 10);
 
 async function start() {
   try {
     await initDb();
     await initRedis();
-    app.listen(PORT, () => {
+    app.listen(PORT, '0.0.0.0', () => {
       console.log(`Event Store service running on port ${PORT}`);
     });
   } catch (error) {

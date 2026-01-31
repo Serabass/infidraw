@@ -16,7 +16,7 @@ function parseStrokeEventMessage(message: string | Buffer): StrokeEvent | null {
 }
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = parseInt(process.env.PORT ?? '3000', 10);
 const WS_PORT = parseInt(process.env.WS_PORT || '3001');
 
 const redisClient = createClient({
@@ -217,7 +217,7 @@ app.get('/health', (req, res) => {
 async function start() {
   try {
     await initRedis();
-    app.listen(PORT, () => {
+    app.listen(PORT, '0.0.0.0', () => {
       console.log(`Realtime Service running on port ${PORT}`);
       console.log(`WebSocket server running on port ${WS_PORT}`);
     });

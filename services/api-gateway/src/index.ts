@@ -111,12 +111,12 @@ app.get('/health', (req, res) => {
   });
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = parseInt(process.env.PORT ?? '3000', 10);
 
 async function start() {
   try {
     await redisClient.connect();
-    app.listen(PORT, () => {
+    app.listen(PORT, '0.0.0.0', () => {
       console.log(`API Gateway running on port ${PORT}`);
     });
   } catch (error) {
