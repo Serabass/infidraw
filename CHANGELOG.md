@@ -6,6 +6,19 @@
 
 ## [Unreleased]
 
+### Changed — Оптимизация рендера и change detection (Angular canvas)
+
+- **Render loop вне Zone:** цикл отрисовки и горячие обработчики (pointermove, wheel, WebSocket onmessage) запускаются в `ngZone.runOutsideAngular`, чтобы не триггерить change detection на каждый кадр/событие.
+- **Dirty rendering:** бесконечный `requestAnimationFrame(loop)` заменён на «грязный» рендер: `requestRender()` выставляет флаг dirty и планирует один rAF; кадр рисует и сбрасывает dirty, без постоянного цикла. Сервис `RenderRequestService`.
+- **ResizeObserver вместо чтения layout в render:** размеры канваса пересчитываются по ResizeObserver на контейнер/канвас с учётом `devicePixelRatio`; `width`/`height` выставляются только при изменении. В `render()` запрещены чтения layout (`clientWidth`/`getBoundingClientRect`); все размеры и `canvasBounds` хранятся в `MemoryService` и обновляются в `updateDimensions()`.
+- **Батч событий:** входящие pointer (move/wheel) и WebSocket-сообщения батчатся и применяются раз в кадр: pointer — через `EventBatchService` (latest за кадр), WS — очередь в `WebSocketService`, обработка в `SyncService.processWsQueue()` из колбэка рендера.
+- **OnPush и throttle UI:** для компонентов канваса/тулбара/меню включён `ChangeDetectionStrategy.OnPush`; обновление FPS и координат троттлится 100–200 ms с `markForCheck()`.
+- **Оверлеи и setPointerCapture:** для оверлеев поверх канваса используется `pointer-events: auto` там, где нужны клики (FPS-панель); на pointerdown вызывается `setPointerCapture`, чтобы события шли на элемент канваса.
+
+Итого: меньше нагрузки на requestAnimationFrame, set width/height и Recalculate style; меньше вызовов Zone (scheduleTask/invokeTask); рендер и ресайз вынесены из «горячего» пути.
+
+---
+
 ### Added — Говорилка (чат-виджет на холсте)
 
 - Новая сущность **«говорилка»**: пользователь добавляет в любое место холста иконку, которая открывает чат.
