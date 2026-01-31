@@ -31,6 +31,7 @@ try {
       try { docker buildx rm $builderName 2>$null } catch { }
       if ($Verbose) { Write-Output "Builder $builderName removed or was missing (RecreateBuilder). Will create with buildkitd.toml." }
     }
+    # After changing buildkitd.toml (e.g. worker.oci snapshotter) run with -RecreateBuilder once.
     try { docker buildx use $builderName 2>$null } catch { }
     if ($LASTEXITCODE -ne 0) {
       if (-not (Test-Path "buildkitd.toml")) { throw "buildkitd.toml not found in $PSScriptRoot" }
@@ -96,7 +97,12 @@ try {
   if ($targetsToBuild) { $bakeArgs += $targetsToBuild }
   if ($Verbose) { $bakeArgs += "--progress=plain" }
 
-  docker @bakeArgs #1> bake.log 2>&1
+  $prevErrorAction = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  docker @bakeArgs 2>&1 | Tee-Object -FilePath bake.log
+  $bakeExitCode = $LASTEXITCODE
+  $ErrorActionPreference = $prevErrorAction
+  if ($bakeExitCode -ne 0) { throw "docker buildx bake exited with $bakeExitCode" }
 
   $endTime = Get-Date
   $executionTime = $endTime - $startTime
