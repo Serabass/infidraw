@@ -1,6 +1,8 @@
 node_modules/
 dist/
 build/
+coverage/
+lcov-report/
 .env
 .env.local
 *.log
