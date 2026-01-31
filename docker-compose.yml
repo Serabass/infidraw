@@ -72,7 +72,7 @@ services:
     expose:
       - "3000"
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:3000/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))\""]
+      test: [ "CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:3000/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))\"" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -89,8 +89,9 @@ services:
         condition: service_healthy
     volumes:
       - ./services/event-store:/app
-      - /app/node_modules
-    command: sh -c "npm install && npm run dev"
+      # - /app/node_modules
+      # command: sh -c "npm install && npm run dev"
+    command: sh -c "npm run dev"
 
   snapshot-worker:
     build: ./services/snapshot-worker
@@ -102,12 +103,14 @@ services:
     # no DB/Redis — stateless render service
 
   tile-service:
-    build: ./services/tile-service
+    build:
+      context: ./services/tile-service
+      dockerfile: Dockerfile.dev
     restart: unless-stopped
     expose:
       - "3000"
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:3000/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))\""]
+      test: [ "CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:3000/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))\"" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -135,7 +138,7 @@ services:
     volumes:
       - ./services/tile-service:/app
       - /app/node_modules
-    command: sh -c "npm install && npm run build && npm start"
+    command: sh -c "npm run build && npm start"
 
   realtime-service:
     build: ./services/realtime-service
@@ -144,7 +147,7 @@ services:
       - "3000"
       - "3001"
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:3000/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))\""]
+      test: [ "CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:3000/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))\"" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -162,8 +165,9 @@ services:
         condition: service_healthy
     volumes:
       - ./services/realtime-service:/app
-      - /app/node_modules
-    command: sh -c "npm install && npm run dev"
+      # - /app/node_modules
+      # command: sh -c "npm install && npm run dev"
+    command: sh -c "npm run dev"
 
   metrics-service:
     build: ./services/metrics-service
@@ -171,7 +175,7 @@ services:
     expose:
       - "3000"
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:3000/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))\""]
+      test: [ "CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:3000/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))\"" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -194,8 +198,9 @@ services:
         condition: service_healthy
     volumes:
       - ./services/metrics-service:/app
-      - /app/node_modules
-    command: sh -c "npm install && npm run dev"
+      # - /app/node_modules
+      # command: sh -c "npm install && npm run dev"
+    command: sh -c "npm run dev"
 
   admin-service:
     build: ./services/admin-service
@@ -203,7 +208,7 @@ services:
     expose:
       - "3000"
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:3000/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))\""]
+      test: [ "CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:3000/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))\"" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -227,8 +232,9 @@ services:
         condition: service_healthy
     volumes:
       - ./services/admin-service:/app
-      - /app/node_modules
-    command: sh -c "npm install && npm run dev"
+      # - /app/node_modules
+      # command: sh -c "npm install && npm run dev"
+    command: sh -c "npm run dev"
 
   frontend-v2:
     build: ./frontend-v2
@@ -236,7 +242,7 @@ services:
       - "80"
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:80/ || exit 1"]
+      test: [ "CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:80/ || exit 1" ]
       interval: 10s
       timeout: 5s
       retries: 5

@@ -1,0 +1,21 @@
+# Local dev image: full deps (cairo + canvas build), devDependencies, tsx watch
+# Build: docker build -f Dockerfile.dev -t tile-service:dev .
+# Run:   docker run -v ${PWD}/src:/app/src -p 3000:3000 tile-service:dev
+# Compose: docker-compose build tile-service (with build.dockerfile: Dockerfile.dev in override)
+
+FROM node:20-alpine AS apk-deps
+RUN --mount=type=cache,target=/var/cache/apk \
+    apk update && apk add --no-cache \
+    build-base python3 py3-pip pkgconfig \
+    cairo-dev pixman-dev jpeg-dev pango-dev giflib-dev libpng-dev && \
+    ln -sf python3 /usr/bin/python
+
+FROM apk-deps AS dev
+WORKDIR /app
+COPY package*.json ./
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --loglevel=error
+COPY tsconfig.json ./
+COPY src ./src
+EXPOSE 3000
+CMD ["npm", "run", "dev"]
