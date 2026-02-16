@@ -1,42 +1,41 @@
-
 param(
   [switch]$NoCache,
   [switch]$FrontendOnly,
   [switch]$Verbose,
   [switch]$ChangedOnly,
   [switch]$RecreateBuilder,
-  [switch]$LocalDocker
+  [switch]$Remote,
+  [switch]$OneByOne
 )
 
 $ErrorActionPreference = "Stop"
 
-# LocalDocker=$true  -> local daemon, no builder, with cache
-# LocalDocker=$false -> remote daemon (192.168.88.13), with builder
+# -Remote: kubernetes driver -> N BuildKit pods in devops ns, bake distributes targets across them.
+$builderName = "devops-kube"
+$kubeNamespace = "devops"
+$kubeReplicas = 8
+$buildkitdConfig = "buildkitd.toml"
+
 $savedDockerHost = $env:DOCKER_HOST
-if ($LocalDocker) {
-  $env:DOCKER_HOST = $null   # local default
-} else {
-  $env:DOCKER_HOST = "tcp://192.168.88.13:32375"
-}
+if ($Remote) { $env:DOCKER_HOST = $null }
+else { $env:DOCKER_HOST = $null }
 
-$builderName = "infidraw-remote"
-
-# Run from repo root so buildkitd.toml and docker-bake.hcl paths resolve correctly
 Push-Location $PSScriptRoot
 try {
-  if (-not $LocalDocker) {
-    # Remote build: docker driver does not support cache export (type=registry). Use docker-container driver.
-    # Registry insecure (reg.serabass.kz) is in buildkitd.toml; passed on builder create.
+  if ($Remote) {
+    if (-not (Test-Path $buildkitdConfig)) { throw "buildkitd.toml not found in $PSScriptRoot" }
     if ($RecreateBuilder) {
-      try { docker buildx rm $builderName 2>$null } catch { }
-      if ($Verbose) { Write-Output "Builder $builderName removed or was missing (RecreateBuilder). Will create with buildkitd.toml." }
+      docker buildx rm $builderName 2>$null
+      if ($Verbose) { Write-Output "Builder $builderName removed (RecreateBuilder)." }
     }
-    # After changing buildkitd.toml (e.g. worker.oci snapshotter) run with -RecreateBuilder once.
-    try { docker buildx use $builderName 2>$null } catch { }
+    docker buildx use $builderName 2>$null
     if ($LASTEXITCODE -ne 0) {
-      if (-not (Test-Path "buildkitd.toml")) { throw "buildkitd.toml not found in $PSScriptRoot" }
-      docker buildx create --name $builderName --driver docker-container --buildkitd-config (Resolve-Path "buildkitd.toml").Path --use
-      if ($Verbose) { Write-Output "Builder $builderName created with buildkitd.toml (insecure registry)." }
+      docker buildx create --name $builderName --driver kubernetes `
+        --driver-opt "namespace=$kubeNamespace" `
+        --driver-opt "replicas=$kubeReplicas" `
+        --buildkitd-config (Resolve-Path $buildkitdConfig).Path `
+        --use
+      if ($Verbose) { Write-Output "Builder $builderName created (kubernetes driver, $kubeReplicas pods)." }
     }
   }
 
@@ -57,19 +56,20 @@ try {
   if ($FrontendOnly) {
     $targetsToBuild = @("frontend-v2")
     $deployments = @("frontend-v2")
-  } elseif ($ChangedOnly) {
+  }
+  elseif ($ChangedOnly) {
     $baseRef = "origin/main"
     try { git rev-parse --verify $baseRef 2>$null | Out-Null } catch { $baseRef = "HEAD~1" }
     $changed = @(git diff --name-only $baseRef 2>$null)
     $pathToTarget = @{
-      "frontend-v2" = "frontend-v2"
-      "services/event-store" = "event-store"
-      "services/api-gateway" = "api-gateway"
+      "frontend-v2"               = "frontend-v2"
+      "services/event-store"      = "event-store"
+      "services/api-gateway"      = "api-gateway"
       "services/realtime-service" = "realtime-service"
-      "services/tile-service" = "tile-service"
-      "services/snapshot-worker" = "snapshot-worker"
-      "services/metrics-service" = "metrics-service"
-      "services/admin-service" = "admin-service"
+      "services/tile-service"     = "tile-service"
+      "services/snapshot-worker"  = "snapshot-worker"
+      "services/metrics-service"  = "metrics-service"
+      "services/admin-service"    = "admin-service"
     }
     $targetsToBuild = @()
     foreach ($p in $changed) {
@@ -86,28 +86,49 @@ try {
     if ($Verbose) { Write-Output "ChangedOnly: building $($targetsToBuild -join ', ')" }
   }
 
-  $bakeArgs = @(
-    "buildx", "bake",
-    "--allow", "security.insecure",
-    "--file", "docker-bake.hcl",
-    "--load",
-    "--push"
-  )
-  if ($NoCache) { $bakeArgs += "--no-cache" }
-  if ($targetsToBuild) { $bakeArgs += $targetsToBuild }
-  if ($Verbose) { $bakeArgs += "--progress=plain" }
-
   $prevErrorAction = $ErrorActionPreference
   $ErrorActionPreference = "Continue"
-  docker @bakeArgs 2>&1 | Tee-Object -FilePath bake.log
-  $bakeExitCode = $LASTEXITCODE
-  $ErrorActionPreference = $prevErrorAction
-  if ($bakeExitCode -ne 0) { throw "docker buildx bake exited with $bakeExitCode" }
 
+  if ($Remote -and $OneByOne) {
+    foreach ($t in $deployments) {
+      $t0 = Get-Date
+      docker buildx bake --builder=$builderName --allow security.insecure -f docker-bake.hcl --provenance=false --push $t 2>&1 | Out-Null
+      $dt = (Get-Date) - $t0
+      if ($LASTEXITCODE -eq 0) { Write-Output "[$t] ok $([int]$dt.TotalSeconds)s" }
+      else { Write-Output "[$t] FAILED"; $ErrorActionPreference = $prevErrorAction; throw "bake $t failed" }
+    }
+  }
+  else {
+    $bakeArgs = @(
+      "buildx", "bake",
+      "--allow", "security.insecure",
+      "--file", "docker-bake.hcl",
+      "--provenance=false"
+    )
+    if ($Remote) {
+      $bakeArgs += "--builder=$builderName"
+      $bakeArgs += "--push"
+    } else {
+      $bakeArgs += "--load"
+      $bakeArgs += "--push"
+      # no registry cache export (avoids 404 on cache push), images still push
+      $allTargets = @("event-store","api-gateway","realtime-service","tile-service","metrics-service","admin-service","frontend-v2","snapshot-worker")
+      foreach ($t in $allTargets) {
+        $bakeArgs += "--set"; $bakeArgs += "${t}.cache-to=type=inline"
+      }
+    }
+    if ($NoCache) { $bakeArgs += "--no-cache" }
+    if ($targetsToBuild) { $bakeArgs += $targetsToBuild }
+    if ($Verbose) { $bakeArgs += "--progress=plain" }
+    docker @bakeArgs 2>&1 | Tee-Object -FilePath output-bake.log
+    $bakeExitCode = $LASTEXITCODE
+    if ($bakeExitCode -ne 0) { $ErrorActionPreference = $prevErrorAction; throw "docker buildx bake exited with $bakeExitCode" }
+  }
+
+  $ErrorActionPreference = $prevErrorAction
   $endTime = Get-Date
   $executionTime = $endTime - $startTime
-
-  Write-Output ("Elapsed: {0:hh\:mm\:ss\.fff}" -f [TimeSpan]::FromSeconds($executionTime.TotalSeconds))
+  Write-Output ("Total: {0:hh\:mm\:ss\.fff}" -f [TimeSpan]::FromSeconds($executionTime.TotalSeconds))
 
   $deployList = $deployments | ForEach-Object { "deployment/$_" }
   kubectl rollout restart -n infidraw $deployList

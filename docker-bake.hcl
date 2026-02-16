@@ -12,7 +12,7 @@ group "default" {
 }
 
 variable "REGISTRY" {
-  default = "reg.serabass.kz"
+  default = "reg.home.local"
 }
 
 variable "TAG" {

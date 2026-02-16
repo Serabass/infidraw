@@ -1,0 +1,44 @@
+# For buildx kubernetes driver (devops-kube). Pods run in devops ns, same registry/mirrors as cluster.
+# https://github.com/moby/buildkit/blob/master/docs/buildkitd.toml.md
+
+debug = true
+insecure-entitlements = ["network.host", "security.insecure"]
+
+[worker.oci]
+enabled = true
+snapshotter = "auto"
+rootless = false
+gc = true
+gckeepstorage = "30%"
+
+[[worker.oci.gcpolicy]]
+keepBytes = "512MB"
+keepDuration = "48h"
+filters = ["type==source.local", "type==exec.cachemount", "type==source.git.checkout"]
+
+[[worker.oci.gcpolicy]]
+all = false
+keepDuration = "168h"
+keepBytes = "20GB"
+
+[[worker.oci.gcpolicy]]
+all = true
+keepBytes = "30GB"
+
+[registry."docker.io"]
+mirrors = ["cache-dockerhub.devops.svc.cluster.local"]
+
+[registry."mcr.microsoft.com"]
+mirrors = ["cache-mcr.devops.svc.cluster.local"]
+
+[registry."reg.serabass.kz"]
+http = true
+insecure = true
+insecure_skip_verify = true
+
+[registry."registry.devops.svc.cluster.local"]
+http = true
+insecure = true
+
+[frontend."dockerfile.v0"]
+enabled = true
