@@ -15,6 +15,14 @@ RUN npm run build
 
 ##################################################################################
 
+# test (run before runtime; build with: docker build --target test .)
+FROM deps AS test
+COPY tsconfig.json jest.config.js jest.setup.js ./
+COPY src ./src
+RUN npm test
+
+##################################################################################
+
 # runtime
 FROM node:20-alpine AS runtime
 WORKDIR /app

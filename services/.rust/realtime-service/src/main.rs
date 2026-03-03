@@ -15,7 +15,6 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
-use tower::MakeService;
 use tracing_subscriber::EnvFilter;
 
 static NEXT_CLIENT_ID: AtomicU64 = AtomicU64::new(0);
@@ -67,18 +66,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], port));
     tracing::info!("Realtime Service (HTTP+WS) on {}", addr);
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    let make_svc = app.into_make_service();
-    loop {
-        let (stream, _) = listener.accept().await?;
-        let make_svc = make_svc.clone();
-        tokio::spawn(async move {
-            let mut make_svc = make_svc;
-            let svc = make_svc.make_service(&()).await.unwrap();
-            let _ = hyper::server::conn::Http::new()
-                .serve_connection(stream, svc)
-                .await;
-        });
-    }
+    axum::serve(listener, app).await?;
+    Ok(())
 }
 
 async fn health(State(state): State<AppState>) -> impl IntoResponse {

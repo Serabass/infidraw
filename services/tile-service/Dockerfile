@@ -25,6 +25,14 @@ RUN npm run build
 
 ##################################################################################
 
+# Stage 3b: Tests
+FROM npm-deps AS test
+COPY tsconfig.json jest.config.js jest.setup.js ./
+COPY src ./src
+RUN npm test
+
+##################################################################################
+
 # Stage 4: Runtime (minimal: only runtime libs for canvas, no build tools)
 FROM node:20-alpine AS apk-runtime-deps
 RUN apk add --no-cache cairo jpeg pango giflib

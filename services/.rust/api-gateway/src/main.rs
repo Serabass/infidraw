@@ -12,7 +12,6 @@ use axum::{
 use std::sync::Arc;
 use std::time::Duration;
 use hyper::body::to_bytes;
-use tower::MakeService;
 use tower_http::cors::CorsLayer;
 use tracing_subscriber::EnvFilter;
 
@@ -77,18 +76,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], port));
     tracing::info!("API Gateway listening on {}", addr);
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    let make_svc = app.into_make_service();
-    loop {
-        let (stream, _) = listener.accept().await?;
-        let make_svc = make_svc.clone();
-        tokio::spawn(async move {
-            let mut make_svc = make_svc;
-            let svc = make_svc.make_service(&()).await.unwrap();
-            let _ = hyper::server::conn::Http::new()
-                .serve_connection(stream, svc)
-                .await;
-        });
-    }
+    axum::serve(listener, app).await?;
+    Ok(())
 }
 
 async fn health() -> impl IntoResponse {
