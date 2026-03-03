@@ -70,7 +70,7 @@ isProject: false
 
 - **Покрытие:** в каждом Rust-проекте под `**./services/.rust/<service>/`** (например `./services/.rust/event-store/`): unit-тесты (`#[test]`), при необходимости интеграционные (`tests/`); сбор покрытия — **cargo-tarpaulin** (или **cargo-llvm-cov**).
 - **Запуск в Docker:** для **каждого** сервиса в `services/.rust/` отдельно: образ с Rust-тулчейном, монтировать каталог этого сервиса (например `./services/.rust/event-store`), в контейнере `cargo test` (и при флаге — `cargo tarpaulin …`). Один контейнер = один сервис.
-- **Скрипт:** например `scripts/test-rust-services.ps1` — цикл по подкаталогам `**./services/.rust/*`** (event-store, api-gateway, …), на каждой итерации один `docker run -v "<path>:/app" … cargo test`; сводка в конце; при падении — exit 1 и дальше bake не вызывать.
+- **Скрипт:** например `scripts/test-rust-services.ps1` — цикл по подкаталогам `**./services/.rust/`*** (event-store, api-gateway, …), на каждой итерации один `docker run -v "<path>:/app" … cargo test`; сводка в конце; при падении — exit 1 и дальше bake не вызывать.
 
 ### Node-сервисы
 

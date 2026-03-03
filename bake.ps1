@@ -50,7 +50,14 @@ try {
     "metrics-service",
     "admin-service",
     "frontend-v2",
-    "snapshot-worker"
+    "snapshot-worker",
+    "event-store-rust",
+    "api-gateway-rust",
+    "realtime-service-rust",
+    "tile-service-rust",
+    "snapshot-worker-rust",
+    "metrics-service-rust",
+    "admin-service-rust"
   )
 
   if ($FrontendOnly) {
@@ -62,14 +69,21 @@ try {
     try { git rev-parse --verify $baseRef 2>$null | Out-Null } catch { $baseRef = "HEAD~1" }
     $changed = @(git diff --name-only $baseRef 2>$null)
     $pathToTarget = @{
-      "frontend-v2"               = "frontend-v2"
-      "services/event-store"      = "event-store"
-      "services/api-gateway"      = "api-gateway"
-      "services/realtime-service" = "realtime-service"
-      "services/tile-service"     = "tile-service"
-      "services/snapshot-worker"  = "snapshot-worker"
-      "services/metrics-service"  = "metrics-service"
-      "services/admin-service"    = "admin-service"
+      "frontend-v2"                  = "frontend-v2"
+      "services/event-store"         = "event-store"
+      "services/api-gateway"          = "api-gateway"
+      "services/realtime-service"    = "realtime-service"
+      "services/tile-service"        = "tile-service"
+      "services/snapshot-worker"     = "snapshot-worker"
+      "services/metrics-service"     = "metrics-service"
+      "services/admin-service"       = "admin-service"
+      "services/.rust/event-store"   = "event-store-rust"
+      "services/.rust/api-gateway"   = "api-gateway-rust"
+      "services/.rust/realtime-service" = "realtime-service-rust"
+      "services/.rust/tile-service"  = "tile-service-rust"
+      "services/.rust/snapshot-worker" = "snapshot-worker-rust"
+      "services/.rust/metrics-service" = "metrics-service-rust"
+      "services/.rust/admin-service" = "admin-service-rust"
     }
     $targetsToBuild = @()
     foreach ($p in $changed) {
@@ -112,7 +126,7 @@ try {
       $bakeArgs += "--load"
       $bakeArgs += "--push"
       # no registry cache export (avoids 404 on cache push), images still push
-      $allTargets = @("event-store","api-gateway","realtime-service","tile-service","metrics-service","admin-service","frontend-v2","snapshot-worker")
+      $allTargets = @("event-store","api-gateway","realtime-service","tile-service","metrics-service","admin-service","frontend-v2","snapshot-worker","event-store-rust","api-gateway-rust","realtime-service-rust","tile-service-rust","snapshot-worker-rust","metrics-service-rust","admin-service-rust")
       foreach ($t in $allTargets) {
         $bakeArgs += "--set"; $bakeArgs += "${t}.cache-to=type=inline"
       }

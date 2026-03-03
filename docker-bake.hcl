@@ -7,6 +7,13 @@ group "default" {
     "snapshot-worker",
     "metrics-service",
     "admin-service",
+    "event-store-rust",
+    "api-gateway-rust",
+    "realtime-service-rust",
+    "tile-service-rust",
+    "snapshot-worker-rust",
+    "metrics-service-rust",
+    "admin-service-rust",
     "frontend-v2"
   ]
 }
@@ -114,6 +121,104 @@ target "admin-service" {
   cache-from = [
     "type=registry,ref=${REGISTRY}/infidraw/admin-service:buildcache",
     "type=registry,ref=${REGISTRY}/infidraw/admin-service:latest",
+  ]
+}
+
+target "event-store-rust" {
+  context = "./services/.rust/event-store"
+  dockerfile = "Dockerfile"
+  tags = ["${REGISTRY}/infidraw/event-store-rust:${TAG}"]
+  cache-to = [
+    "type=inline",
+    "type=registry,ref=${REGISTRY}/infidraw/event-store-rust:buildcache,mode=max",
+  ]
+  cache-from = [
+    "type=registry,ref=${REGISTRY}/infidraw/event-store-rust:buildcache",
+    "type=registry,ref=${REGISTRY}/infidraw/event-store-rust:latest",
+  ]
+}
+
+target "api-gateway-rust" {
+  context = "./services/.rust/api-gateway"
+  dockerfile = "Dockerfile"
+  tags = ["${REGISTRY}/infidraw/api-gateway-rust:${TAG}"]
+  cache-to = [
+    "type=inline",
+    "type=registry,ref=${REGISTRY}/infidraw/api-gateway-rust:buildcache,mode=max",
+  ]
+  cache-from = [
+    "type=registry,ref=${REGISTRY}/infidraw/api-gateway-rust:buildcache",
+    "type=registry,ref=${REGISTRY}/infidraw/api-gateway-rust:latest",
+  ]
+}
+
+target "realtime-service-rust" {
+  context = "./services/.rust/realtime-service"
+  dockerfile = "Dockerfile"
+  tags = ["${REGISTRY}/infidraw/realtime-service-rust:${TAG}"]
+  cache-to = [
+    "type=inline",
+    "type=registry,ref=${REGISTRY}/infidraw/realtime-service-rust:buildcache,mode=max",
+  ]
+  cache-from = [
+    "type=registry,ref=${REGISTRY}/infidraw/realtime-service-rust:buildcache",
+    "type=registry,ref=${REGISTRY}/infidraw/realtime-service-rust:latest",
+  ]
+}
+
+target "tile-service-rust" {
+  context = "./services/.rust/tile-service"
+  dockerfile = "Dockerfile"
+  tags = ["${REGISTRY}/infidraw/tile-service-rust:${TAG}"]
+  cache-to = [
+    "type=inline",
+    "type=registry,ref=${REGISTRY}/infidraw/tile-service-rust:buildcache,mode=max",
+  ]
+  cache-from = [
+    "type=registry,ref=${REGISTRY}/infidraw/tile-service-rust:buildcache",
+    "type=registry,ref=${REGISTRY}/infidraw/tile-service-rust:latest",
+  ]
+}
+
+target "snapshot-worker-rust" {
+  context = "./services/.rust/snapshot-worker"
+  dockerfile = "Dockerfile"
+  tags = ["${REGISTRY}/infidraw/snapshot-worker-rust:${TAG}"]
+  cache-to = [
+    "type=inline",
+    "type=registry,ref=${REGISTRY}/infidraw/snapshot-worker-rust:buildcache,mode=max",
+  ]
+  cache-from = [
+    "type=registry,ref=${REGISTRY}/infidraw/snapshot-worker-rust:buildcache",
+    "type=registry,ref=${REGISTRY}/infidraw/snapshot-worker-rust:latest",
+  ]
+}
+
+target "metrics-service-rust" {
+  context = "./services/.rust/metrics-service"
+  dockerfile = "Dockerfile"
+  tags = ["${REGISTRY}/infidraw/metrics-service-rust:${TAG}"]
+  cache-to = [
+    "type=inline",
+    "type=registry,ref=${REGISTRY}/infidraw/metrics-service-rust:buildcache,mode=max",
+  ]
+  cache-from = [
+    "type=registry,ref=${REGISTRY}/infidraw/metrics-service-rust:buildcache",
+    "type=registry,ref=${REGISTRY}/infidraw/metrics-service-rust:latest",
+  ]
+}
+
+target "admin-service-rust" {
+  context = "./services/.rust/admin-service"
+  dockerfile = "Dockerfile"
+  tags = ["${REGISTRY}/infidraw/admin-service-rust:${TAG}"]
+  cache-to = [
+    "type=inline",
+    "type=registry,ref=${REGISTRY}/infidraw/admin-service-rust:buildcache,mode=max",
+  ]
+  cache-from = [
+    "type=registry,ref=${REGISTRY}/infidraw/admin-service-rust:buildcache",
+    "type=registry,ref=${REGISTRY}/infidraw/admin-service-rust:latest",
   ]
 }
 

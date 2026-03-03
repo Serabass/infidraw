@@ -12,3 +12,7 @@ lcov-report/
 *.swp
 *.swo
 *~
+
+# Rust (services/.rust/*)
+**/target/
+*.rs.bk
