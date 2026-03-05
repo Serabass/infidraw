@@ -44,6 +44,11 @@ variable "USE_REGISTRY_CACHE" {
   default = "1"
 }
 
+# Set to "0" if registry returns 404 on cache blob upload (cache-to). Cache-from still used.
+variable "USE_REGISTRY_CACHE_TO" {
+  default = "0"
+}
+
 variable "SCCACHE_REDIS_ENDPOINT" {
   default = "redis://192.168.88.100:30379"
 }
@@ -62,7 +67,7 @@ function "cache_to" {
   params = [name]
   result = concat(
     ["type=inline"],
-    USE_REGISTRY_CACHE == "1" ? [
+    (USE_REGISTRY_CACHE == "1" && USE_REGISTRY_CACHE_TO == "1") ? [
       "type=registry,ref=${REGISTRY}/infidraw/${name}:buildcache,mode=max"
     ] : []
   )

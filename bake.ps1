@@ -77,21 +77,21 @@ try {
     try { git rev-parse --verify $baseRef 2>$null | Out-Null } catch { $baseRef = "HEAD~1" }
     $changed = @(git diff --name-only $baseRef 2>$null)
     $pathToTarget = @{
-      "frontend-v2"                  = "frontend-v2"
-      "services/event-store"         = "event-store"
-      "services/api-gateway"          = "api-gateway"
-      "services/realtime-service"    = "realtime-service"
-      "services/tile-service"        = "tile-service"
-      "services/snapshot-worker"     = "snapshot-worker"
-      "services/metrics-service"     = "metrics-service"
-      "services/admin-service"       = "admin-service"
-      "services/.rust/event-store"   = "event-store-rust"
-      "services/.rust/api-gateway"   = "api-gateway-rust"
+      "frontend-v2"                     = "frontend-v2"
+      "services/event-store"            = "event-store"
+      "services/api-gateway"            = "api-gateway"
+      "services/realtime-service"       = "realtime-service"
+      "services/tile-service"           = "tile-service"
+      "services/snapshot-worker"        = "snapshot-worker"
+      "services/metrics-service"        = "metrics-service"
+      "services/admin-service"          = "admin-service"
+      "services/.rust/event-store"      = "event-store-rust"
+      "services/.rust/api-gateway"      = "api-gateway-rust"
       "services/.rust/realtime-service" = "realtime-service-rust"
-      "services/.rust/tile-service"  = "tile-service-rust"
-      "services/.rust/snapshot-worker" = "snapshot-worker-rust"
-      "services/.rust/metrics-service" = "metrics-service-rust"
-      "services/.rust/admin-service" = "admin-service-rust"
+      "services/.rust/tile-service"     = "tile-service-rust"
+      "services/.rust/snapshot-worker"  = "snapshot-worker-rust"
+      "services/.rust/metrics-service"  = "metrics-service-rust"
+      "services/.rust/admin-service"    = "admin-service-rust"
     }
     $targetsToBuild = @()
     foreach ($p in $changed) {
@@ -130,7 +130,8 @@ try {
     if ($Remote) {
       $bakeArgs += "--builder=$builderName"
       $bakeArgs += "--push"
-    } else {
+    }
+    else {
       $bakeArgs += "--push"
       if (-not $WithRegistryCache) {
         # no registry cache (avoids 404 on missing buildcache): inline cache only
