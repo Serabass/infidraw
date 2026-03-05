@@ -5,7 +5,8 @@ param(
   [switch]$ChangedOnly,
   [switch]$RecreateBuilder,
   [switch]$Remote,
-  [switch]$OneByOne
+  [switch]$OneByOne,
+  [switch]$WithRegistryCache
 )
 
 $ErrorActionPreference = "Stop"
@@ -126,10 +127,9 @@ try {
     } else {
       $bakeArgs += "--load"
       $bakeArgs += "--push"
-      # no registry cache export (avoids 404 on cache push), images still push
-      $allTargets = @("event-store","api-gateway","realtime-service","tile-service","metrics-service","admin-service","frontend-v2","snapshot-worker","event-store-rust","api-gateway-rust","realtime-service-rust","tile-service-rust","snapshot-worker-rust","metrics-service-rust","admin-service-rust")
-      foreach ($t in $allTargets) {
-        $bakeArgs += "--set"; $bakeArgs += "${t}.cache-to=type=inline"
+      if (-not $WithRegistryCache) {
+        # no registry cache (avoids 404 on missing buildcache): inline cache only
+        $env:USE_REGISTRY_CACHE = "0"
       }
     }
     if ($NoCache) { $bakeArgs += "--no-cache" }

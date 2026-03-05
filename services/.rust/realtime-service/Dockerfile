@@ -1,4 +1,6 @@
 FROM rust:1.91-bookworm AS builder
+# Limit parallel jobs so multiple bake targets do not thrash (rand_chacha etc. are heavy)
+ENV CARGO_BUILD_JOBS=2
 WORKDIR /app
 COPY Cargo.toml Cargo.lock* ./
 COPY src ./src
