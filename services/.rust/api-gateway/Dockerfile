@@ -6,8 +6,17 @@ ENV SCCACHE_REDIS_ENDPOINT=${SCCACHE_REDIS_ENDPOINT}
 ENV SCCACHE_LOG=info
 WORKDIR /app
 COPY Cargo.toml Cargo.lock* ./
+# Dummy src so this layer only builds deps; cached until Cargo.toml/Cargo.lock change
+RUN mkdir -p src && echo 'fn main() {}' > src/main.rs
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/app/target \
+    cargo build --release
 COPY src ./src
-RUN cargo test --release && cargo build --release
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/app/target \
+    cargo test --release && cargo build --release
 
 FROM debian:bookworm-slim AS runtime
 RUN apt-get update -y && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*

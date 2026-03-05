@@ -11,7 +11,7 @@ use axum::{
 };
 use std::sync::Arc;
 use std::time::Duration;
-use hyper::body::to_bytes;
+use axum::body::to_bytes;
 use tower_http::cors::CorsLayer;
 use tracing_subscriber::EnvFilter;
 
@@ -153,7 +153,8 @@ async fn proxy_api(State(state): State<AppState>, request: Request<Body>) -> imp
         format!("{}?{}", target_url, query)
     };
     let method = request.method().clone();
-    let mut out_req = state.client.request(method, &full_url);
+    let reqwest_method = reqwest::Method::try_from(method.as_str()).unwrap_or(reqwest::Method::GET);
+    let mut out_req = state.client.request(reqwest_method, &full_url);
     for (name, value) in request.headers() {
         if name == header::HOST
             || name == header::CONNECTION
@@ -166,7 +167,7 @@ async fn proxy_api(State(state): State<AppState>, request: Request<Body>) -> imp
         }
     }
     let body = request.into_body();
-    let body_bytes = match to_bytes(body).await {
+    let body_bytes = match to_bytes(body, 10 * 1024 * 1024).await {
         Ok(b) => b,
         Err(e) => {
             tracing::warn!("Body read error: {}", e);
@@ -186,10 +187,16 @@ async fn proxy_api(State(state): State<AppState>, request: Request<Body>) -> imp
     let status = resp.status();
     let headers = resp.headers().clone();
     let body = resp.bytes().await.unwrap_or_default();
-    let mut response = (status, body).into_response();
+    let axum_status = StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+    let mut response = (axum_status, body).into_response();
     for (k, v) in headers {
         if let Some(name) = k {
-            response.headers_mut().insert(name, v);
+            if let (Ok(axum_name), Ok(axum_value)) = (
+                axum::http::header::HeaderName::try_from(name.as_str()),
+                axum::http::HeaderValue::try_from(v.as_bytes()),
+            ) {
+                response.headers_mut().insert(axum_name, axum_value);
+            }
         }
     }
     response

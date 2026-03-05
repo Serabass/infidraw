@@ -4,11 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-axum = { version = "0.6", features = ["json"] }
+axum = { version = "0.7", features = ["json"] }
 tokio = { version = "1", features = ["full"] }
 tower = "0.4"
-tower-http = { version = "0.4", features = ["cors"] }
-hyper = "0.14"
+tower-http = { version = "0.5", features = ["cors"] }
 redis = { version = "0.22", features = ["tokio-comp", "connection-manager"] }
 reqwest = { version = "0.11", features = ["json"] }
 serde = { version = "1", features = ["derive"] }

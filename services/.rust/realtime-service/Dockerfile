@@ -4,12 +4,19 @@ ARG SCCACHE_REDIS_ENDPOINT
 ENV RUSTC_WRAPPER=sccache
 ENV SCCACHE_REDIS_ENDPOINT=${SCCACHE_REDIS_ENDPOINT}
 ENV SCCACHE_LOG=info
-# Limit parallel jobs so multiple bake targets do not thrash (rand_chacha etc. are heavy)
 ENV CARGO_BUILD_JOBS=2
 WORKDIR /app
 COPY Cargo.toml Cargo.lock* ./
+RUN mkdir -p src && echo 'fn main() {}' > src/main.rs
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/app/target \
+    cargo build --release
 COPY src ./src
-RUN cargo test --release && cargo build --release
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/app/target \
+    cargo test --release && cargo build --release
 
 FROM debian:bookworm-slim AS runtime
 RUN apt-get update -y && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
