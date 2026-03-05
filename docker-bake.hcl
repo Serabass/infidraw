@@ -44,6 +44,10 @@ variable "USE_REGISTRY_CACHE" {
   default = "1"
 }
 
+variable "SCCACHE_REDIS_ENDPOINT" {
+  default = "redis://192.168.88.100:30379"
+}
+
 #########################################################################
 
 function "cache_from" {
@@ -128,6 +132,7 @@ target "event-store-rust" {
   tags = ["${REGISTRY}/infidraw/rust/event-store:${TAG}"]
   cache-to = cache_to("event-store-rust")
   cache-from = cache_from("event-store-rust")
+  args = { SCCACHE_REDIS_ENDPOINT = SCCACHE_REDIS_ENDPOINT }
 }
 
 target "api-gateway-rust" {
@@ -136,6 +141,7 @@ target "api-gateway-rust" {
   tags = ["${REGISTRY}/infidraw/rust/api-gateway:${TAG}"]
   cache-to = cache_to("api-gateway-rust")
   cache-from = cache_from("api-gateway-rust")
+  args = { SCCACHE_REDIS_ENDPOINT = SCCACHE_REDIS_ENDPOINT }
 }
 
 target "realtime-service-rust" {
@@ -144,6 +150,7 @@ target "realtime-service-rust" {
   tags = ["${REGISTRY}/infidraw/rust/realtime-service:${TAG}"]
   cache-to = cache_to("realtime-service-rust")
   cache-from = cache_from("realtime-service-rust")
+  args = { SCCACHE_REDIS_ENDPOINT = SCCACHE_REDIS_ENDPOINT }
 }
 
 target "tile-service-rust" {
@@ -152,6 +159,7 @@ target "tile-service-rust" {
   tags = ["${REGISTRY}/infidraw/rust/tile-service:${TAG}"]
   cache-to = cache_to("tile-service-rust")
   cache-from = cache_from("tile-service-rust")
+  args = { SCCACHE_REDIS_ENDPOINT = SCCACHE_REDIS_ENDPOINT }
 }
 
 target "snapshot-worker-rust" {
@@ -160,6 +168,7 @@ target "snapshot-worker-rust" {
   tags = ["${REGISTRY}/infidraw/rust/snapshot-worker:${TAG}"]
   cache-to = cache_to("snapshot-worker-rust")
   cache-from = cache_from("snapshot-worker-rust")
+  args = { SCCACHE_REDIS_ENDPOINT = SCCACHE_REDIS_ENDPOINT }
 }
 
 target "metrics-service-rust" {
@@ -168,6 +177,7 @@ target "metrics-service-rust" {
   tags = ["${REGISTRY}/infidraw/rust/metrics-service:${TAG}"]
   cache-to = cache_to("metrics-service-rust")
   cache-from = cache_from("metrics-service-rust")
+  args = { SCCACHE_REDIS_ENDPOINT = SCCACHE_REDIS_ENDPOINT }
 }
 
 target "admin-service-rust" {
@@ -176,6 +186,7 @@ target "admin-service-rust" {
   tags = ["${REGISTRY}/infidraw/rust/admin-service:${TAG}"]
   cache-to = cache_to("admin-service-rust")
   cache-from = cache_from("admin-service-rust")
+  args = { SCCACHE_REDIS_ENDPOINT = SCCACHE_REDIS_ENDPOINT }
 }
 
 target "frontend-v2" {

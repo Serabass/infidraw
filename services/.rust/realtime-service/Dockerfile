@@ -1,4 +1,9 @@
 FROM rust:1.91-bookworm AS builder
+RUN cargo install sccache --locked
+ARG SCCACHE_REDIS_ENDPOINT
+ENV RUSTC_WRAPPER=sccache
+ENV SCCACHE_REDIS_ENDPOINT=${SCCACHE_REDIS_ENDPOINT}
+ENV SCCACHE_LOG=info
 # Limit parallel jobs so multiple bake targets do not thrash (rand_chacha etc. are heavy)
 ENV CARGO_BUILD_JOBS=2
 WORKDIR /app

@@ -1,4 +1,9 @@
 FROM rust:1.91-bookworm AS builder
+RUN cargo install sccache --locked
+ARG SCCACHE_REDIS_ENDPOINT
+ENV RUSTC_WRAPPER=sccache
+ENV SCCACHE_REDIS_ENDPOINT=${SCCACHE_REDIS_ENDPOINT}
+ENV SCCACHE_LOG=info
 WORKDIR /app
 COPY Cargo.toml Cargo.lock* ./
 COPY src ./src

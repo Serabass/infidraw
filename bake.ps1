@@ -44,7 +44,12 @@ try {
   $startTime = Get-Date
 
   $targetsToBuild = $null
-  $deployments = @(
+  if ($args.Count -gt 0) {
+    $targetsToBuild = @($args)
+    $deployments = @($args)
+    if ($Verbose) { Write-Output "Building targets: $($targetsToBuild -join ', ')" }
+  }
+  $deploymentsDefault = @(
     "event-store",
     "api-gateway",
     "realtime-service",
@@ -61,6 +66,7 @@ try {
     "metrics-service-rust",
     "admin-service-rust"
   )
+  if (-not $targetsToBuild) { $deployments = $deploymentsDefault }
 
   if ($FrontendOnly) {
     $targetsToBuild = @("frontend-v2")
@@ -125,12 +131,12 @@ try {
       $bakeArgs += "--builder=$builderName"
       $bakeArgs += "--push"
     } else {
-      $bakeArgs += "--load"
       $bakeArgs += "--push"
       if (-not $WithRegistryCache) {
         # no registry cache (avoids 404 on missing buildcache): inline cache only
         $env:USE_REGISTRY_CACHE = "0"
       }
+      # No --load: push-only avoids "image already exists" on export; k8s pulls from registry
     }
     if ($NoCache) { $bakeArgs += "--no-cache" }
     if ($targetsToBuild) { $bakeArgs += $targetsToBuild }
