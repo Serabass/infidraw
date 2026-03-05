@@ -18,8 +18,20 @@ group "default" {
   ]
 }
 
+group "rust" {
+  targets = [
+    "event-store-rust",
+    "api-gateway-rust",
+    "realtime-service-rust",
+    "tile-service-rust",
+    "snapshot-worker-rust",
+    "metrics-service-rust",
+    "admin-service-rust"
+  ]
+}
+
 variable "REGISTRY" {
-  default = "reg.home.local"
+  default = "reg.serabass.kz"
 }
 
 variable "TAG" {

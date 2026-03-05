@@ -15,10 +15,11 @@ $builderName = "devops-kube"
 $kubeNamespace = "devops"
 $kubeReplicas = 8
 $buildkitdConfig = "buildkitd.toml"
+# Remote Docker host: all builds go through it
+$remoteDockerHost = "tcp://192.168.88.100:32375"
 
 $savedDockerHost = $env:DOCKER_HOST
-if ($Remote) { $env:DOCKER_HOST = $null }
-else { $env:DOCKER_HOST = $null }
+$env:DOCKER_HOST = $remoteDockerHost
 
 Push-Location $PSScriptRoot
 try {
